@@ -1,0 +1,16 @@
+{
+  "name": "orantix-ledger",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev:api": "pnpm --filter @orantix-ledger/api start:dev",
+    "dev:web": "pnpm --filter @orantix-ledger/web dev",
+    "build": "pnpm -r build",
+    "prisma:generate": "pnpm --filter @orantix-ledger/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @orantix-ledger/api prisma:migrate",
+    "seed": "pnpm --filter @orantix-ledger/api seed"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
