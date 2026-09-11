@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRequireAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
+import { useToast } from '@/lib/toast';
 import { Account, Capture, ReviewReason } from '@/lib/api';
 
 const REASON_LABEL: Record<ReviewReason, string> = {
@@ -16,6 +17,7 @@ export default function CaptureDetailPage({ params }: { params: { id: string } }
   const { ready, token } = useRequireAuth();
   const api = useApi();
   const router = useRouter();
+  const toast = useToast();
 
   const [capture, setCapture] = useState<Capture | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -48,6 +50,7 @@ export default function CaptureDetailPage({ params }: { params: { id: string } }
     setError(null);
     try {
       await api.classifyCapture(capture.id, { expenseAccountId, paymentAccountId, saveAsRule });
+      toast.show('Posted to the ledger.', 'success');
       router.push('/');
       router.refresh();
     } catch (err) {

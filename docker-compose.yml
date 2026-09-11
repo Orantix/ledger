@@ -28,6 +28,8 @@ services:
       DATABASE_URL: postgresql://ledger:ledger@db:5432/orantix_ledger?schema=public
       PORT: 3001
       UPLOADS_DIR: /app/apps/api/uploads
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in a .env file next to docker-compose.yml (openssl rand -base64 48)}"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
     ports:
       - "3001:3001"
     volumes:

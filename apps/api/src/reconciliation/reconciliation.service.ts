@@ -79,14 +79,21 @@ export class ReconciliationService {
     accountId: string | null,
     data: { description: string; amount: number | null },
   ) {
+    // Match regardless of status: once a human has explained a flag, a
+    // re-scan of the same still-unresolved condition must not silently
+    // reopen it — that would make "explain" meaningless. Only a brand new
+    // occurrence (no flag at all yet) creates a fresh OPEN one.
     const existing = await this.prisma.varianceFlag.findFirst({
-      where: { periodId, type, accountId, status: VarianceStatus.OPEN },
+      where: { periodId, type, accountId },
+      orderBy: { createdAt: 'desc' },
     });
     if (existing) {
-      await this.prisma.varianceFlag.update({
-        where: { id: existing.id },
-        data: { description: data.description, amount: data.amount },
-      });
+      if (existing.status === VarianceStatus.OPEN) {
+        await this.prisma.varianceFlag.update({
+          where: { id: existing.id },
+          data: { description: data.description, amount: data.amount },
+        });
+      }
       return;
     }
     await this.prisma.varianceFlag.create({

@@ -4,6 +4,7 @@ import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRequireAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
+import { useToast } from '@/lib/toast';
 import { Attachment, PaymentMethod } from '@/lib/api';
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -14,6 +15,7 @@ export default function NewCapturePage() {
   const { ready, token } = useRequireAuth();
   const api = useApi();
   const router = useRouter();
+  const toast = useToast();
 
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
@@ -70,7 +72,7 @@ export default function NewCapturePage() {
     setSubmitting(true);
     setError(null);
     try {
-      await api.createCapture({
+      const created = await api.createCapture({
         description,
         amount: Number(amount),
         date,
@@ -82,6 +84,10 @@ export default function NewCapturePage() {
         shareholderName: paymentMethod === 'PERSONAL' && shareholderName ? shareholderName : undefined,
         attachmentIds: attachment ? [attachment.id] : undefined,
       });
+      toast.show(
+        created.status === 'POSTED' ? 'Capture posted to the ledger.' : 'Saved — no rule matched, sent to the review queue.',
+        created.status === 'POSTED' ? 'success' : 'info',
+      );
       router.push('/');
       router.refresh();
     } catch (err) {

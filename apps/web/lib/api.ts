@@ -8,6 +8,16 @@ export type FsStatement = 'INCOME_STATEMENT' | 'BALANCE_SHEET';
 export type CashFlowCategory = 'OPERATING' | 'INVESTING' | 'FINANCING' | 'NONE';
 export type PeriodStatus = 'DRAFT' | 'FINAL';
 export type VarianceStatus = 'OPEN' | 'EXPLAINED';
+export type Role = 'OWNER' | 'STAFF' | 'BOOKKEEPER' | 'ACCOUNTANT' | 'ADMIN';
+
+export interface AppUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  isActive: boolean;
+  createdAt: string;
+}
 
 export interface Account {
   id: string;
@@ -171,6 +181,20 @@ class ApiError extends Error {
 
 export { ApiError };
 
+// NestJS error responses are JSON: { message: string | string[], error, statusCode }.
+// Surface that message to the user instead of the raw JSON blob.
+function extractErrorMessage(body: string): string | null {
+  if (!body) return null;
+  try {
+    const parsed = JSON.parse(body);
+    if (Array.isArray(parsed.message)) return parsed.message.join('; ');
+    if (typeof parsed.message === 'string') return parsed.message;
+  } catch {
+    return body;
+  }
+  return null;
+}
+
 async function apiFetch<T>(token: string | null, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -183,7 +207,7 @@ async function apiFetch<T>(token: string | null, path: string, init?: RequestIni
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new ApiError(res.status, body || `API ${path} failed: ${res.status}`);
+    throw new ApiError(res.status, extractErrorMessage(body) ?? `Request failed (${res.status})`);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -314,6 +338,17 @@ export function createApiClient(token: string | null) {
       f<{ burnRate: number | null; currentCashBalance: number; runwayMonths: number | null; note?: string }>(
         '/dashboard/burn-rate',
       ),
+
+    // Users (admin) & self-service account
+    listUsers: () => f<AppUser[]>('/users'),
+    createUser: (data: { email: string; name: string; role: Role }) =>
+      f<{ user: AppUser; temporaryPassword: string }>('/users', { method: 'POST', body: JSON.stringify(data) }),
+    updateUser: (id: string, data: { role?: Role; isActive?: boolean }) =>
+      f<AppUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    resetUserPassword: (id: string) =>
+      f<{ temporaryPassword: string }>(`/users/${id}/reset-password`, { method: 'POST' }),
+    changePassword: (data: { currentPassword: string; newPassword: string }) =>
+      f<{ ok: boolean }>('/auth/change-password', { method: 'POST', body: JSON.stringify(data) }),
   };
 }
 

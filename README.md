@@ -49,8 +49,20 @@ financial statements are generated straight off that same ledger.
 - **Access control** — JWT auth, five roles (Owner, Staff, Bookkeeper,
   Accountant, Admin). Every route requires auth by default; sensitive
   actions (classify, reverse, finalize, chart-of-accounts edits, FS mapping
-  edits) are role-gated. Minimal by design — a dedicated identity product
-  can replace this later.
+  edits) are role-gated. Admins can add/disable users and reset passwords
+  from the app; every user can change their own password. Minimal by
+  design — a dedicated identity product can replace this later.
+- **Production hardening** — the API refuses to boot with a missing,
+  placeholder, or short `JWT_SECRET`; login is rate-limited; security
+  headers (helmet) and configurable CORS are on by default; seeding a real
+  deployment (`seed:accounts` + `create-admin`) never creates demo users or
+  a shared password the way the dev seed does.
+- **Tests** — an integration suite (`pnpm test` in `apps/api`) covers the
+  ledger's money-math paths against a real Postgres test database: balanced
+  vs. unbalanced postings, reversal correctness, sensitive-account and
+  anomaly-based review routing, balance-sheet balancing, period finalization
+  and the period-closed guard, and the reconciliation explain-then-finalize
+  flow.
 
 ### Known gaps (deliberately out of scope for this pass)
 
@@ -83,9 +95,12 @@ financial statements are generated straight off that same ledger.
    models over the same `journal_lines` — nothing is a separate system
    that needs reconciling against the book.
 
-## Running locally with Docker Compose
+## Running locally with Docker Compose (dev/demo data)
 
 ```bash
+cp .env.example .env
+# put a real value in .env: JWT_SECRET=$(openssl rand -base64 48)
+
 docker compose up --build
 ```
 
@@ -100,7 +115,7 @@ docker compose exec api pnpm prisma:deploy
 docker compose exec api pnpm seed
 ```
 
-## Running locally without Docker
+## Running locally without Docker (dev/demo data)
 
 Requires a local Postgres reachable at the URL in `apps/api/.env`.
 
@@ -109,8 +124,17 @@ pnpm install
 
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env.local
-# set a real JWT_SECRET in apps/api/.env before anything but local testing
+```
 
+Generate a real secret before starting the API — it refuses to boot
+without one:
+
+```bash
+# put the output in apps/api/.env as JWT_SECRET="..."
+openssl rand -base64 48
+```
+
+```bash
 pnpm prisma:generate
 pnpm prisma:migrate   # creates the schema
 pnpm seed              # chart of accounts, rules, FS mappings, dev users
@@ -119,21 +143,63 @@ pnpm dev:api   # http://localhost:3001
 pnpm dev:web   # http://localhost:3000
 ```
 
-## Seed data
+## Deploying for real use (no demo data)
 
-`apps/api/prisma/seed.ts` seeds, for Orantix's own books (the single real
-entity this pipeline is being validated against before it's generalized
-further):
+Same steps, except skip `pnpm seed` — it deliberately refuses to run with
+`NODE_ENV=production`, since it creates demo users sharing one password.
+Use this instead:
 
-- A minimal SME chart of accounts (Bank, Creditors, Director's Current
-  Account, Share Capital, a handful of expense categories), with Bank
-  marked `isCash` and Director's Current Account / Share Capital marked
-  `sensitive`.
-- A starter set of classification rules.
-- FS mappings for every seeded account (Income Statement / Balance Sheet,
-  section, note label, cash-flow category).
-- One dev user per role, all sharing `SEED_PASSWORD` (default
-  `orantix123`): `admin@orantix.local`, `owner@orantix.local`,
-  `bookkeeper@orantix.local`, `accountant@orantix.local`,
-  `staff@orantix.local`. **Change or remove these before this ever holds
-  real data.**
+```bash
+pnpm prisma:deploy          # or prisma:migrate on first setup
+pnpm seed:accounts          # chart of accounts, rules, FS mappings — no users
+
+# creates exactly one admin account; omit ADMIN_PASSWORD to get a
+# random one printed once
+ADMIN_EMAIL=you@yourcompany.com ADMIN_PASSWORD='...' pnpm create-admin
+```
+
+Log in as that admin and add everyone else from the **Users** page — each
+new account gets a random temporary password shown once, which you
+communicate out of band. Also set, in `apps/api/.env`:
+
+- `ALLOWED_ORIGINS` — comma-separated list of origins allowed to call the
+  API (e.g. your web app's URL). Left unset, the API allows all origins
+  and logs a warning — fine for local dev, not for anything public.
+- A reverse proxy (Caddy, nginx, Traefik) terminating HTTPS in front of
+  both services — neither one does TLS itself.
+- A backup plan for the Postgres volume — it's a normal Postgres database,
+  so standard `pg_dump`/`pg_basebackup` practice applies.
+
+## Seed data (dev/demo only)
+
+`apps/api/prisma/seed.ts` seeds a starter chart of accounts (Bank,
+Creditors, Director's Current Account, Share Capital, a handful of expense
+categories — Bank marked `isCash`, Director's Current Account / Share
+Capital marked `sensitive`), classification rules, FS mappings, and **one
+dev user per role, all sharing `SEED_PASSWORD`** (default `orantix123`):
+`admin@orantix.local`, `owner@orantix.local`, `bookkeeper@orantix.local`,
+`accountant@orantix.local`, `staff@orantix.local`.
+
+This is for trying the app out, not for anything real — see "Deploying
+for real use" above.
+
+## Testing
+
+```bash
+cd apps/api
+pnpm test
+```
+
+Spins up (or reuses) a `orantix_ledger_test` database on the same Postgres
+server referenced by `TEST_ADMIN_DATABASE_URL`/`TEST_DATABASE_URL`
+(defaults to the same credentials as local dev), runs migrations against
+it, and exercises the ledger's posting, reversal, review-routing, and
+financial-statement logic end to end. No mocking of the database — these
+are the real Prisma models and real Postgres.
+
+## License
+
+AGPL-3.0 — see [LICENSE](LICENSE). Self-hosting, modifying, and using this
+commercially for your own bookkeeping is all fine. If you modify it and
+run it as a service for others, the AGPL requires you to make your
+modified source available to them too.

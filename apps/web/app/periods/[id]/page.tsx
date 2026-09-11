@@ -3,6 +3,7 @@
 import { Fragment, FormEvent, useEffect, useState } from 'react';
 import { useRequireAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
+import { useToast } from '@/lib/toast';
 import {
   BalanceSheetSide,
   FiscalPeriod,
@@ -19,6 +20,7 @@ type Tab = 'income' | 'balance' | 'equity' | 'cashflow' | 'variance';
 export default function PeriodDetailPage({ params }: { params: { id: string } }) {
   const { ready, token, user } = useRequireAuth();
   const api = useApi();
+  const toast = useToast();
   const periodId = params.id;
 
   const [tab, setTab] = useState<Tab>('income');
@@ -77,6 +79,7 @@ export default function PeriodDetailPage({ params }: { params: { id: string } })
     try {
       const updated = await api.finalizePeriod(periodId);
       setPeriod(updated);
+      toast.show(`${updated.label} finalized — locked against new postings.`, 'success');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not finalize');
     } finally {
@@ -88,6 +91,7 @@ export default function PeriodDetailPage({ params }: { params: { id: string } })
     await api.explainFlag(flagId, explanation);
     const updated = await api.listVarianceFlags(periodId);
     setFlags(updated);
+    toast.show('Flag explained.', 'success');
   }
 
   if (!ready || !token) return null;

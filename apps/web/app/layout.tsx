@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { AuthProvider } from '@/lib/auth';
+import { ToastProvider } from '@/lib/toast';
 import { Nav } from '@/components/Nav';
 import './globals.css';
 
@@ -12,10 +13,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <AuthProvider>
-          <Nav />
-          <div className="shell">{children}</div>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <Nav />
+            <div className="shell">{children}</div>
+          </AuthProvider>
+        </ToastProvider>
       </body>
     </html>
   );
