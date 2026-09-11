@@ -27,9 +27,73 @@ enum CaptureStatus {
   POSTED
 }
 
+enum ReviewReason {
+  NO_RULE
+  SENSITIVE_ACCOUNT
+  UNUSUAL_AMOUNT
+}
+
 enum JournalEntryStatus {
   POSTED
   REVERSED
+}
+
+enum Role {
+  OWNER
+  STAFF
+  BOOKKEEPER
+  ACCOUNTANT
+  ADMIN
+}
+
+enum ExtractionStatus {
+  PENDING
+  COMPLETE
+  FAILED
+  UNSUPPORTED
+}
+
+enum FsStatement {
+  INCOME_STATEMENT
+  BALANCE_SHEET
+}
+
+enum CashFlowCategory {
+  OPERATING
+  INVESTING
+  FINANCING
+  NONE
+}
+
+enum PeriodStatus {
+  DRAFT
+  FINAL
+}
+
+enum VarianceType {
+  UNMAPPED_ACCOUNT
+  CAPITAL_SHORTFALL
+  CUSTOM
+}
+
+enum VarianceStatus {
+  OPEN
+  EXPLAINED
+}
+
+// Roles: Owner/Director (dashboard + FS approval), general staff (capture-only),
+// Bookkeeper (ledger + review queue), Accountant/Auditor (read-only + FS mapping),
+// Admin. Minimal local auth — a dedicated identity product can replace this later.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  @@map("users")
 }
 
 // Chart of accounts. Seeded with a minimal SME set; extensible per entity.
@@ -39,11 +103,17 @@ model Account {
   name      String
   type      AccountType
   isActive  Boolean     @default(true)
+  // Equity/capital/related-party accounts always route to review even if a
+  // classification rule matches deterministically.
+  sensitive Boolean     @default(false)
+  // Marks the account(s) cash-flow-statement and dashboard cash views sum over.
+  isCash    Boolean     @default(false)
   createdAt DateTime    @default(now())
 
   journalLines           JournalLine[]
   rulesAsExpenseAccount  ClassificationRule[] @relation("ExpenseAccount")
   rulesAsPaymentAccount  ClassificationRule[] @relation("PaymentAccount")
+  fsMappings             AccountFsMapping[]
 
   @@map("accounts")
 }
@@ -72,17 +142,24 @@ model ClassificationRule {
 // The plain-language entry a non-accountant makes. Never edited after posting;
 // this is the audit trail's starting point alongside its attachments.
 model Capture {
-  id            String        @id @default(cuid())
-  description   String
-  amount        Decimal       @db.Decimal(14, 2)
-  currency      String        @default("LKR")
-  date          DateTime
-  paymentMethod PaymentMethod
-  category      String
-  notes         String?
-  status        CaptureStatus @default(DRAFT)
-  createdBy     String
-  createdAt     DateTime      @default(now())
+  id             String        @id @default(cuid())
+  description    String
+  amount         Decimal       @db.Decimal(14, 2)
+  currency       String        @default("LKR")
+  // Rate to the entity's base currency, applied at posting time. 1 when
+  // currency == base currency. Manually entered — no external FX dependency.
+  exchangeRate   Decimal       @db.Decimal(14, 6) @default(1)
+  date           DateTime
+  paymentMethod  PaymentMethod
+  category       String
+  notes          String?
+  // Who the personal-draw / related-party side belongs to. Only meaningful
+  // for PERSONAL payment method and capital-related captures.
+  shareholderName String?
+  status         CaptureStatus @default(DRAFT)
+  reviewReason   ReviewReason?
+  createdBy      String
+  createdAt      DateTime      @default(now())
 
   appliedRule   ClassificationRule? @relation(fields: [appliedRuleId], references: [id])
   appliedRuleId String?
@@ -96,16 +173,27 @@ model Capture {
   @@map("captures")
 }
 
-// First-class, permanently linked source document (receipt/invoice/bill).
+// First-class source document (receipt/invoice/bill). Can exist before a
+// capture does — uploaded first so extraction can pre-fill the capture form,
+// then linked once the capture is created.
 model Attachment {
-  id         String   @id @default(cuid())
-  capture    Capture  @relation(fields: [captureId], references: [id])
-  captureId  String
-  filename   String
-  mimeType   String
-  sizeBytes  Int
+  id          String   @id @default(cuid())
+  capture     Capture? @relation(fields: [captureId], references: [id])
+  captureId   String?
+  filename    String
+  mimeType    String
+  sizeBytes   Int
   storagePath String
-  uploadedAt DateTime @default(now())
+  uploadedAt  DateTime @default(now())
+
+  extractionStatus     ExtractionStatus @default(PENDING)
+  extractedVendor      String?
+  extractedAmount      Decimal?         @db.Decimal(14, 2)
+  extractedDate        DateTime?
+  extractedCurrency    String?
+  ocrRawText           String?
+  // Per-field confidence 0-1, e.g. {"amount": 0.9, "date": 0.5, "vendor": 0.6}
+  extractionConfidence Json?
 
   @@map("attachments")
 }
@@ -142,4 +230,86 @@ model JournalLine {
   @@index([journalEntryId])
   @@index([accountId])
   @@map("journal_lines")
+}
+
+// Configurable, versioned note/statement categorization — re-mapping an
+// account is tracked, never a silent rewrite of prior FS output.
+model AccountFsMapping {
+  id               String            @id @default(cuid())
+  account          Account           @relation(fields: [accountId], references: [id])
+  accountId        String
+  statement        FsStatement
+  section          String
+  noteLabel        String
+  cashFlowCategory CashFlowCategory  @default(NONE)
+  sortOrder        Int               @default(0)
+  version          Int               @default(1)
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+
+  @@unique([accountId, version])
+  @@index([accountId, isActive])
+  @@map("account_fs_mappings")
+}
+
+// A reporting period. DRAFT statements can be regenerated freely; FINAL
+// locks the period against new postings (reversals still allowed).
+model FiscalPeriod {
+  id           String        @id @default(cuid())
+  label        String
+  startDate    DateTime
+  endDate      DateTime
+  status       PeriodStatus  @default(DRAFT)
+  finalizedBy  String?
+  finalizedAt  DateTime?
+  createdAt    DateTime      @default(now())
+
+  varianceFlags VarianceFlag[]
+
+  @@map("fiscal_periods")
+}
+
+// Gaps that would otherwise be invisible until someone manually
+// reverse-engineers them after the fact. Must be explained before a period
+// can go Final.
+model VarianceFlag {
+  id           String         @id @default(cuid())
+  period       FiscalPeriod   @relation(fields: [periodId], references: [id])
+  periodId     String
+  type         VarianceType
+  accountId    String?
+  description  String
+  amount       Decimal?       @db.Decimal(14, 2)
+  status       VarianceStatus @default(OPEN)
+  explanation  String?
+  resolvedBy   String?
+  resolvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+
+  @@index([periodId, status])
+  @@map("variance_flags")
+}
+
+// Committed capital per shareholder, compared against actual paid-in
+// capital to catch shortfalls as soon as they occur.
+model CapitalCommitment {
+  id              String   @id @default(cuid())
+  shareholderName String
+  committedAmount Decimal  @db.Decimal(14, 2)
+  currency        String   @default("LKR")
+  createdAt       DateTime @default(now())
+
+  @@map("capital_commitments")
+}
+
+// Monthly budget per account, for budget-vs-actual on the owner dashboard.
+model Budget {
+  id        String   @id @default(cuid())
+  accountId String
+  month     String   // "YYYY-MM"
+  amount    Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+
+  @@unique([accountId, month])
+  @@map("budgets")
 }

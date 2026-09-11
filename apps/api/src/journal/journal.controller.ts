@@ -1,5 +1,9 @@
 import { Controller, Get, Param, Post } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { JournalService } from './journal.service';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { JwtPayload } from '../auth/auth.service';
 
 @Controller('journal-entries')
 export class JournalController {
@@ -16,8 +20,8 @@ export class JournalController {
   }
 
   @Post(':id/reverse')
-  reverse(@Param('id') id: string) {
-    // TODO: replace hardcoded actor once auth/RBAC lands.
-    return this.journalService.reverse(id, 'system');
+  @Roles(Role.BOOKKEEPER, Role.ADMIN)
+  reverse(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.journalService.reverse(id, user.email);
   }
 }

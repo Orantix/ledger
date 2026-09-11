@@ -1,5 +1,10 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, Capture } from '@/lib/api';
+import { useRequireAuth } from '@/lib/auth';
+import { useApi } from '@/lib/useApi';
+import { Capture } from '@/lib/api';
 
 function StatusBadge({ status }: { status: Capture['status'] }) {
   const cls = status === 'POSTED' ? 'posted' : status === 'PENDING_REVIEW' ? 'review' : 'draft';
@@ -7,14 +12,23 @@ function StatusBadge({ status }: { status: Capture['status'] }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
-export default async function CapturesPage() {
-  let captures: Capture[] = [];
-  let error: string | null = null;
-  try {
-    captures = await api.listCaptures();
-  } catch (e) {
-    error = e instanceof Error ? e.message : 'Failed to load captures';
-  }
+export default function CapturesPage() {
+  const { ready, token } = useRequireAuth();
+  const api = useApi();
+  const [captures, setCaptures] = useState<Capture[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!ready || !token) return;
+    api
+      .listCaptures()
+      .then(setCaptures)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load captures'))
+      .finally(() => setLoading(false));
+  }, [ready, token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!ready || !token) return null;
 
   return (
     <>
@@ -23,9 +37,10 @@ export default async function CapturesPage() {
         Every transaction entered in plain language, and where it stands in the pipeline.
       </p>
 
-      {error && <p className="error">{error}. Is the API running on NEXT_PUBLIC_API_URL?</p>}
+      {error && <p className="error">{error}</p>}
+      {loading && !error && <p className="empty">Loading…</p>}
 
-      {!error && (
+      {!error && !loading && (
         <div className="card">
           {captures.length === 0 ? (
             <p className="empty">No captures yet. Start with &ldquo;New capture&rdquo;.</p>

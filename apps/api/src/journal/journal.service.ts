@@ -24,6 +24,7 @@ export class JournalService {
   // manual review) never write journal_lines directly.
   async postEntry(input: CreateJournalEntryInput, tx: Prisma.TransactionClient = this.prisma) {
     this.assertBalanced(input.lines);
+    await this.assertPeriodOpen(input.date, tx);
 
     return tx.journalEntry.create({
       data: {
@@ -40,6 +41,20 @@ export class JournalService {
       },
       include: { lines: true },
     });
+  }
+
+  // Finalized periods are locked against new postings. Reversals bypass
+  // this (they're always dated "now" via reverse() below) — a correction
+  // must always be possible, even for a closed period.
+  private async assertPeriodOpen(date: Date, tx: Prisma.TransactionClient) {
+    const finalPeriod = await tx.fiscalPeriod.findFirst({
+      where: { status: 'FINAL', startDate: { lte: date }, endDate: { gte: date } },
+    });
+    if (finalPeriod) {
+      throw new BadRequestException(
+        `Cannot post to ${date.toISOString().slice(0, 10)} — period "${finalPeriod.label}" is already finalized`,
+      );
+    }
   }
 
   private assertBalanced(lines: JournalLineInput[]) {

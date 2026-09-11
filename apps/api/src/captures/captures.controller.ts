@@ -13,10 +13,13 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { randomUUID } from 'crypto';
-import { CaptureStatus } from '@prisma/client';
+import { CaptureStatus, Role } from '@prisma/client';
 import { CapturesService } from './captures.service';
 import { CreateCaptureDto } from './dto/create-capture.dto';
 import { ReviewClassifyDto } from './dto/review-classify.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { JwtPayload } from '../auth/auth.service';
 
 const ALLOWED_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
 
@@ -25,9 +28,9 @@ export class CapturesController {
   constructor(private readonly capturesService: CapturesService) {}
 
   @Post()
-  create(@Body() dto: CreateCaptureDto) {
-    // TODO: replace hardcoded actor once auth/RBAC lands.
-    return this.capturesService.create(dto, 'system');
+  @Roles(Role.STAFF, Role.BOOKKEEPER, Role.OWNER, Role.ADMIN)
+  create(@Body() dto: CreateCaptureDto, @CurrentUser() user: JwtPayload) {
+    return this.capturesService.create(dto, user.email);
   }
 
   @Get()
@@ -41,6 +44,7 @@ export class CapturesController {
   }
 
   @Post(':id/attachments')
+  @Roles(Role.STAFF, Role.BOOKKEEPER, Role.OWNER, Role.ADMIN)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
@@ -67,8 +71,8 @@ export class CapturesController {
   }
 
   @Post(':id/classify')
-  classify(@Param('id') id: string, @Body() dto: ReviewClassifyDto) {
-    // TODO: replace hardcoded actor once auth/RBAC lands.
-    return this.capturesService.classifyForReview(id, dto, 'system');
+  @Roles(Role.BOOKKEEPER, Role.OWNER, Role.ADMIN)
+  classify(@Param('id') id: string, @Body() dto: ReviewClassifyDto, @CurrentUser() user: JwtPayload) {
+    return this.capturesService.classifyForReview(id, dto, user.email);
   }
 }

@@ -7,4 +7,6 @@ apps/api/uploads/*
 !apps/api/uploads/.gitkeep
 *.log
 .DS_Store
+*.tsbuildinfo
+*.traineddata
 .claude/scheduled_tasks.lock

@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { AccountType } from '@prisma/client';
 
 export class CreateAccountDto {
@@ -12,4 +12,12 @@ export class CreateAccountDto {
 
   @IsEnum(AccountType)
   type!: AccountType;
+
+  @IsBoolean()
+  @IsOptional()
+  sensitive?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isCash?: boolean;
 }

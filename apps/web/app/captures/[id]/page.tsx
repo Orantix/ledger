@@ -2,10 +2,21 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Account, api, Capture } from '@/lib/api';
+import { useRequireAuth } from '@/lib/auth';
+import { useApi } from '@/lib/useApi';
+import { Account, Capture, ReviewReason } from '@/lib/api';
+
+const REASON_LABEL: Record<ReviewReason, string> = {
+  NO_RULE: 'No classification rule matched this category and payment method.',
+  SENSITIVE_ACCOUNT: 'This touches an equity/related-party account, which always needs a human sign-off.',
+  UNUSUAL_AMOUNT: 'This amount is unusually large compared to past captures in this category.',
+};
 
 export default function CaptureDetailPage({ params }: { params: { id: string } }) {
+  const { ready, token } = useRequireAuth();
+  const api = useApi();
   const router = useRouter();
+
   const [capture, setCapture] = useState<Capture | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [expenseAccountId, setExpenseAccountId] = useState('');
@@ -16,14 +27,19 @@ export default function CaptureDetailPage({ params }: { params: { id: string } }
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!ready || !token) return;
     Promise.all([api.getCapture(params.id), api.listAccounts()])
       .then(([c, a]) => {
         setCapture(c);
         setAccounts(a);
+        if (c.appliedRule) {
+          setExpenseAccountId(c.appliedRule.expenseAccount.id);
+          setPaymentAccountId(c.appliedRule.paymentAccount.id);
+        }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
-  }, [params.id]);
+  }, [ready, token, params.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -40,6 +56,7 @@ export default function CaptureDetailPage({ params }: { params: { id: string } }
     }
   }
 
+  if (!ready || !token) return null;
   if (loading) return <p className="empty">Loading…</p>;
   if (error) return <p className="error">{error}</p>;
   if (!capture) return <p className="empty">Not found.</p>;
@@ -47,10 +64,7 @@ export default function CaptureDetailPage({ params }: { params: { id: string } }
   return (
     <>
       <h1>Review capture</h1>
-      <p className="subtitle">
-        No classification rule matched &ldquo;{capture.category}&rdquo; paid via {capture.paymentMethod}.
-        Pick the accounts to post this to.
-      </p>
+      <p className="subtitle">{capture.reviewReason ? REASON_LABEL[capture.reviewReason] : 'Pick the accounts to post this to.'}</p>
 
       <div className="card">
         <h2>{capture.description}</h2>
@@ -58,8 +72,21 @@ export default function CaptureDetailPage({ params }: { params: { id: string } }
           {capture.currency} {Number(capture.amount).toFixed(2)} · {new Date(capture.date).toLocaleDateString()}
           {capture.notes ? ` · ${capture.notes}` : ''}
         </p>
+        {capture.shareholderName && <p className="subtitle">Related party: {capture.shareholderName}</p>}
         {capture.attachments.length > 0 && (
-          <p className="subtitle">{capture.attachments.length} attachment(s) on file.</p>
+          <p className="subtitle">
+            {capture.attachments.map((a) => (
+              <a key={a.id} href={api.attachmentFileUrl(a.id)} target="_blank" rel="noreferrer" style={{ marginRight: 12 }}>
+                📎 {a.filename}
+              </a>
+            ))}
+          </p>
+        )}
+        {capture.appliedRule && (
+          <p className="subtitle">
+            Suggested (from a matching rule): {capture.appliedRule.expenseAccount.code} · {capture.appliedRule.expenseAccount.name} /{' '}
+            {capture.appliedRule.paymentAccount.code} · {capture.appliedRule.paymentAccount.name} — still requires your confirmation.
+          </p>
         )}
       </div>
 

@@ -10,7 +10,7 @@ export class AccountsService {
     return this.prisma.account.findMany({ orderBy: { code: 'asc' } });
   }
 
-  create(data: { code: string; name: string; type: AccountType }) {
+  create(data: { code: string; name: string; type: AccountType; sensitive?: boolean; isCash?: boolean }) {
     return this.prisma.account.create({ data });
   }
 }

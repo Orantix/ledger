@@ -1,17 +1,29 @@
-import { api, TrialBalance } from '@/lib/api';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRequireAuth } from '@/lib/auth';
+import { useApi } from '@/lib/useApi';
+import { TrialBalance } from '@/lib/api';
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export default async function TrialBalancePage() {
-  let tb: TrialBalance | null = null;
-  let error: string | null = null;
-  try {
-    tb = await api.getTrialBalance();
-  } catch (e) {
-    error = e instanceof Error ? e.message : 'Failed to load trial balance';
-  }
+export default function TrialBalancePage() {
+  const { ready, token } = useRequireAuth();
+  const api = useApi();
+  const [tb, setTb] = useState<TrialBalance | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ready || !token) return;
+    api
+      .getTrialBalance()
+      .then(setTb)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load trial balance'));
+  }, [ready, token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!ready || !token) return null;
 
   return (
     <>
