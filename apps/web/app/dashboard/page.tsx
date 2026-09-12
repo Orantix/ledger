@@ -8,6 +8,45 @@ function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function CashflowChart({ months }: { months: { month: string; netChange: number }[] }) {
+  const width = 680;
+  const height = 190;
+  const labelPad = 22;
+  const plotHeight = height - labelPad;
+  const baseline = plotHeight * 0.58;
+  const positiveSpace = baseline - 14;
+  const negativeSpace = plotHeight - baseline - 14;
+  const maxAbs = Math.max(1, ...months.map((m) => Math.abs(m.netChange)));
+
+  const slot = width / months.length;
+  const barWidth = Math.min(46, slot * 0.5);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ maxWidth: width, display: 'block' }}>
+      <line x1={0} y1={baseline} x2={width} y2={baseline} stroke="var(--border)" strokeWidth={1} />
+      {months.map((m, i) => {
+        const cx = i * slot + slot / 2;
+        const isPos = m.netChange >= 0;
+        const barHeight = Math.max(3, (Math.abs(m.netChange) / maxAbs) * (isPos ? positiveSpace : negativeSpace));
+        const y = isPos ? baseline - barHeight : baseline;
+        const color = isPos ? 'var(--chart-pos)' : 'var(--chart-neg)';
+        const labelY = isPos ? y - 6 : y + barHeight + 14;
+        return (
+          <g key={m.month}>
+            <rect x={cx - barWidth / 2} y={y} width={barWidth} height={barHeight} rx={4} fill={color} />
+            <text x={cx} y={labelY} textAnchor="middle" fontSize={10.5} fill="var(--muted)">
+              {m.netChange !== 0 ? fmt(m.netChange) : ''}
+            </text>
+            <text x={cx} y={height - 4} textAnchor="middle" fontSize={11} fill="var(--muted-2)">
+              {m.month.slice(5)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export default function DashboardPage() {
   const { ready, token, user } = useRequireAuth();
   const api = useApi();
@@ -58,61 +97,38 @@ export default function DashboardPage() {
   if (error) return <p className="error">{error}</p>;
   if (!cashflow || !burn) return <p className="empty">Loading…</p>;
 
-  const maxAbs = Math.max(1, ...cashflow.months.map((m) => Math.abs(m.netChange)));
+  const runwayLabel =
+    burn.runwayMonths === null ? 'Not burning cash' : burn.runwayMonths === 0 ? 'Out of cash' : `${fmt(burn.runwayMonths)} mo`;
 
   return (
     <>
       <h1>Owner dashboard</h1>
       <p className="subtitle">Real cash-basis view of the business — distinct from the accrual income statement.</p>
 
+      {!burn.note && (
+        <div className="card-row">
+          <div className="stat-card" style={{ ['--accent-bar' as string]: 'var(--accent)' }}>
+            <p className="stat-label">Cash balance</p>
+            <p className={`stat-value ${burn.currentCashBalance < 0 ? 'negative' : ''}`}>{fmt(burn.currentCashBalance)}</p>
+          </div>
+          <div className="stat-card" style={{ ['--accent-bar' as string]: 'var(--warn)' }}>
+            <p className="stat-label">Monthly burn</p>
+            <p className="stat-value">{fmt(burn.burnRate ?? 0)}</p>
+          </div>
+          <div className="stat-card" style={{ ['--accent-bar' as string]: burn.runwayMonths === 0 ? 'var(--danger)' : 'var(--ok)' }}>
+            <p className="stat-label">Runway</p>
+            <p className={`stat-value ${burn.runwayMonths === 0 ? 'negative' : ''}`}>{runwayLabel}</p>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <h2>Cash flow (last {cashflow.months.length} months)</h2>
-        {cashflow.note ? (
-          <p className="subtitle">{cashflow.note}</p>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, height: 120 }}>
-            {cashflow.months.map((m) => (
-              <div key={m.month} style={{ textAlign: 'center', flex: 1 }}>
-                <div
-                  style={{
-                    height: `${Math.max(4, (Math.abs(m.netChange) / maxAbs) * 90)}px`,
-                    background: m.netChange >= 0 ? 'var(--ok)' : '#b3261e',
-                    borderRadius: 3,
-                    marginBottom: 4,
-                  }}
-                  title={`${m.month}: ${fmt(m.netChange)}`}
-                />
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{m.month.slice(5)}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        {cashflow.note ? <p className="subtitle">{cashflow.note}</p> : <CashflowChart months={cashflow.months} />}
       </div>
 
-      <div className="row">
-        <div className="card">
-          <h2>Burn rate & runway</h2>
-          {burn.note ? (
-            <p className="subtitle">{burn.note}</p>
-          ) : (
-            <>
-              <p>
-                Monthly burn: <strong>{fmt(burn.burnRate ?? 0)}</strong>
-              </p>
-              <p>
-                Cash balance: <strong>{fmt(burn.currentCashBalance)}</strong>
-              </p>
-              <p>
-                Runway:{' '}
-                <strong>
-                  {burn.runwayMonths === null ? 'Not burning cash' : burn.runwayMonths === 0 ? 'Out of cash' : `${fmt(burn.runwayMonths)} months`}
-                </strong>
-              </p>
-            </>
-          )}
-        </div>
-
-        <div className="card">
+      <div className="card-row">
+        <div className="card" style={{ marginBottom: 0 }}>
           <h2>Related-party balances</h2>
           <p className="subtitle">What the company owes each director from personal-draw payments.</p>
           {relatedParty.length === 0 ? (
@@ -130,56 +146,58 @@ export default function DashboardPage() {
             </table>
           )}
         </div>
-      </div>
 
-      <div className="card">
-        <h2>Capital: committed vs paid-in</h2>
-        {capital.length === 0 ? (
-          <p className="empty">No capital commitments recorded.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Shareholder</th>
-                <th className="num">Committed</th>
-                <th className="num">Paid in</th>
-                <th className="num">Shortfall</th>
-              </tr>
-            </thead>
-            <tbody>
-              {capital.map((c) => (
-                <tr key={c.shareholderName}>
-                  <td>{c.shareholderName}</td>
-                  <td className="num">{fmt(c.committed)}</td>
-                  <td className="num">{fmt(c.paidIn)}</td>
-                  <td className="num">{c.shortfall > 0 ? <span style={{ color: '#b3261e' }}>{fmt(c.shortfall)}</span> : fmt(c.shortfall)}</td>
+        <div className="card" style={{ marginBottom: 0 }}>
+          <h2>Capital: committed vs paid-in</h2>
+          {capital.length === 0 ? (
+            <p className="empty">No capital commitments recorded.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Shareholder</th>
+                  <th className="num">Committed</th>
+                  <th className="num">Paid in</th>
+                  <th className="num">Shortfall</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {capital.map((c) => (
+                  <tr key={c.shareholderName}>
+                    <td>{c.shareholderName}</td>
+                    <td className="num">{fmt(c.committed)}</td>
+                    <td className="num">{fmt(c.paidIn)}</td>
+                    <td className="num">
+                      {c.shortfall > 0 ? <span style={{ color: 'var(--danger)' }}>{fmt(c.shortfall)}</span> : fmt(c.shortfall)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
 
-        {canManageCapital && (
-          <form onSubmit={onAddCommitment} className="row" style={{ marginTop: 16 }}>
-            <input
-              required
-              placeholder="Shareholder name"
-              value={shareholderName}
-              onChange={(e) => setShareholderName(e.target.value)}
-            />
-            <input
-              required
-              type="number"
-              step="0.01"
-              placeholder="Committed amount"
-              value={committedAmount}
-              onChange={(e) => setCommittedAmount(e.target.value)}
-            />
-            <button type="submit" disabled={addingCommitment} style={{ flex: 'none' }}>
-              Add commitment
-            </button>
-          </form>
-        )}
+          {canManageCapital && (
+            <form onSubmit={onAddCommitment} className="row" style={{ marginTop: 16 }}>
+              <input
+                required
+                placeholder="Shareholder name"
+                value={shareholderName}
+                onChange={(e) => setShareholderName(e.target.value)}
+              />
+              <input
+                required
+                type="number"
+                step="0.01"
+                placeholder="Committed amount"
+                value={committedAmount}
+                onChange={(e) => setCommittedAmount(e.target.value)}
+              />
+              <button type="submit" disabled={addingCommitment} style={{ flex: 'none' }}>
+                Add
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </>
   );
