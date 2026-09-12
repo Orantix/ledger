@@ -1,0 +1,20 @@
+# Applies to every image built from this repo (context: . in docker-compose.yml).
+# Without this, COPY apps/*/. into a build stage drags in host-machine
+# artifacts — including a stale tsconfig.tsbuildinfo, which makes nest
+# build silently skip emitting dist/ (it did, once) — and secrets like .env.
+
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+**/coverage
+
+**/.env
+**/.env.*
+!**/.env.example
+
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+
+.git
+.claude

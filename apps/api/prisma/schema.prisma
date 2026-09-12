@@ -1,5 +1,10 @@
 generator client {
   provider = "prisma-client-js"
+  // "native" covers local dev on your host machine. The other two cover
+  // the Docker image (node:*-alpine ships OpenSSL 3.x, not 1.1.x — without
+  // these, Prisma silently fetches the wrong engine binary and the API
+  // crashes on boot with "Error loading shared library libssl.so.1.1").
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {

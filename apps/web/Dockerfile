@@ -21,5 +21,8 @@ COPY --from=build /app/apps/web/package.json ./apps/web/package.json
 COPY --from=build /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=build /app/node_modules ./node_modules
 WORKDIR /app/apps/web
-EXPOSE 3000
-CMD ["pnpm", "start"]
+EXPOSE 8080
+# Invoke next directly rather than "pnpm start" — the runtime stage never
+# carries the root package.json's packageManager pin, so corepack would
+# otherwise re-download pnpm from the registry on every container start.
+CMD ["node_modules/.bin/next", "start", "-p", "8080"]

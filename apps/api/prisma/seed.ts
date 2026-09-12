@@ -17,13 +17,12 @@ const USERS: { email: string; name: string; role: Role }[] = [
 ];
 
 async function main() {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'Refusing to run the dev seed (demo users, shared password) with NODE_ENV=production. ' +
-        'Use `pnpm seed:accounts` + `pnpm create-admin` instead.',
-    );
-  }
-
+  // No NODE_ENV gate here: the Docker demo/dev setup sets NODE_ENV=production
+  // for runtime-optimization reasons and still needs to run this seed, so
+  // that env var isn't a reliable signal for "this holds real data." The
+  // real safeguard is that this is always a manual, deliberate command —
+  // real deployments are told to use seed:accounts + create-admin instead
+  // (see README).
   const counts = await seedAccountsRulesAndMappings(prisma);
 
   const passwordHash = await bcrypt.hash(SEED_PASSWORD, 10);

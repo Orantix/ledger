@@ -105,7 +105,7 @@ docker compose up --build
 ```
 
 - API: http://localhost:3001
-- Web: http://localhost:3000
+- Web: http://localhost:8080
 
 The API container runs against a fresh Postgres with no schema yet — run
 migrations and seed once the `db` service is healthy:
@@ -140,7 +140,7 @@ pnpm prisma:migrate   # creates the schema
 pnpm seed              # chart of accounts, rules, FS mappings, dev users
 
 pnpm dev:api   # http://localhost:3001
-pnpm dev:web   # http://localhost:3000
+pnpm dev:web   # http://localhost:8080
 ```
 
 ## Deploying for real use (no demo data)

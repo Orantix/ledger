@@ -5,7 +5,7 @@
       "name": "web",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@orantix-ledger/web", "dev"],
-      "port": 3000
+      "port": 8080
     }
   ]
 }

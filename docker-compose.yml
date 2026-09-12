@@ -29,7 +29,7 @@ services:
       PORT: 3001
       UPLOADS_DIR: /app/apps/api/uploads
       JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in a .env file next to docker-compose.yml (openssl rand -base64 48)}"
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
     ports:
       - "3001:3001"
     volumes:
@@ -47,7 +47,7 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:3001
     ports:
-      - "3000:3000"
+      - "8080:8080"
 
 volumes:
   db-data:
