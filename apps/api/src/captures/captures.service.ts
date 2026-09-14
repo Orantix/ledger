@@ -3,7 +3,9 @@ import { CaptureStatus, Prisma, ReviewReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { JournalService } from '../journal/journal.service';
 import { ClassificationService } from '../classification/classification.service';
+import { SettingsService } from '../settings/settings.service';
 import { CreateCaptureDto } from './dto/create-capture.dto';
+import { UpdateCaptureDto } from './dto/update-capture.dto';
 import { ReviewClassifyDto } from './dto/review-classify.dto';
 
 // A capture posts on its own only when it's both a known category/payment
@@ -18,7 +20,25 @@ export class CapturesService {
     private readonly prisma: PrismaService,
     private readonly journalService: JournalService,
     private readonly classificationService: ClassificationService,
+    private readonly settingsService: SettingsService,
   ) {}
+
+  // Never let a non-base currency silently post at rate 1 — that's the
+  // exact bug that got a USD invoice recorded as if it were LKR. Callers
+  // pass the fully-resolved currency/exchangeRate pair (after merging any
+  // partial update onto the existing capture), so this is one shared check
+  // for both create and edit.
+  private resolveExchangeRate(currency: string, exchangeRate: number | undefined, baseCurrency: string): number {
+    if (currency === baseCurrency) {
+      return 1;
+    }
+    if (exchangeRate === undefined) {
+      throw new BadRequestException(
+        `An exchange rate to ${baseCurrency} is required because this capture's currency (${currency}) differs from the base currency.`,
+      );
+    }
+    return exchangeRate;
+  }
 
   private async decideReviewReason(
     normalizedCategory: string,
@@ -59,11 +79,15 @@ export class CapturesService {
       ? await this.decideReviewReason(normalizedCategory, dto.amount, resolved)
       : ReviewReason.NO_RULE;
 
+    const baseCurrency = await this.settingsService.getBaseCurrency();
+    const currency = dto.currency ?? baseCurrency;
+    const exchangeRate = this.resolveExchangeRate(currency, dto.exchangeRate, baseCurrency);
+
     const baseData = {
       description: dto.description,
       amount: dto.amount,
-      currency: dto.currency ?? 'LKR',
-      exchangeRate: dto.exchangeRate ?? 1,
+      currency,
+      exchangeRate,
       date: new Date(dto.date),
       paymentMethod: dto.paymentMethod,
       category: normalizedCategory,
@@ -99,7 +123,7 @@ export class CapturesService {
         });
       }
 
-      const baseAmount = round2(dto.amount * (dto.exchangeRate ?? 1));
+      const baseAmount = round2(dto.amount * exchangeRate);
       const entry = await this.journalService.postEntry(
         {
           date: baseData.date,
@@ -136,6 +160,47 @@ export class CapturesService {
   findOne(id: string) {
     return this.prisma.capture.findUniqueOrThrow({
       where: { id },
+      include: {
+        attachments: true,
+        appliedRule: { include: { expenseAccount: true, paymentAccount: true } },
+        journalEntry: { include: { lines: { include: { account: true } } } },
+      },
+    });
+  }
+
+  // A capture is only ever an intake record until it's POSTED — no journal
+  // lines exist for it yet, so correcting it here isn't an audit-trail
+  // violation. Once POSTED, the JournalEntry is what's immutable; fixing a
+  // mistake from there means reversing that entry, not editing the capture.
+  async update(id: string, dto: UpdateCaptureDto, updatedBy: string) {
+    const capture = await this.prisma.capture.findUniqueOrThrow({ where: { id } });
+    if (capture.status === CaptureStatus.POSTED) {
+      throw new BadRequestException(
+        'This capture has already been posted to the ledger and can no longer be edited — reverse the journal entry instead.',
+      );
+    }
+
+    const baseCurrency = await this.settingsService.getBaseCurrency();
+    const currency = dto.currency ?? capture.currency;
+    const exchangeRate = this.resolveExchangeRate(
+      currency,
+      dto.exchangeRate ?? (currency === capture.currency ? Number(capture.exchangeRate) : undefined),
+      baseCurrency,
+    );
+
+    return this.prisma.capture.update({
+      where: { id },
+      data: {
+        description: dto.description ?? capture.description,
+        amount: dto.amount ?? capture.amount,
+        currency,
+        exchangeRate,
+        date: dto.date ? new Date(dto.date) : capture.date,
+        paymentMethod: dto.paymentMethod ?? capture.paymentMethod,
+        category: dto.category ? dto.category.trim().toLowerCase() : capture.category,
+        notes: dto.notes ?? capture.notes,
+        shareholderName: dto.shareholderName ?? capture.shareholderName,
+      },
       include: {
         attachments: true,
         appliedRule: { include: { expenseAccount: true, paymentAccount: true } },

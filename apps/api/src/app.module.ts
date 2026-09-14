@@ -16,6 +16,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { FinancialStatementsModule } from './financial-statements/financial-statements.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     FinancialStatementsModule,
     ReconciliationModule,
     DashboardModule,
+    SettingsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

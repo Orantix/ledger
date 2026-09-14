@@ -171,6 +171,10 @@ export interface CapitalCommitment {
   currency: string;
 }
 
+export interface OrgSettings {
+  baseCurrency: string;
+}
+
 class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -236,6 +240,20 @@ export function createApiClient(token: string | null) {
       id: string,
       data: { expenseAccountId: string; paymentAccountId: string; saveAsRule?: boolean },
     ) => f<Capture>(`/captures/${id}/classify`, { method: 'POST', body: JSON.stringify(data) }),
+    updateCapture: (
+      id: string,
+      data: Partial<{
+        description: string;
+        amount: number;
+        date: string;
+        paymentMethod: PaymentMethod;
+        category: string;
+        notes: string;
+        currency: string;
+        exchangeRate: number;
+        shareholderName: string;
+      }>,
+    ) => f<Capture>(`/captures/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
     // Attachments (standalone upload + OCR)
     uploadAttachment: async (file: File): Promise<Attachment> => {
@@ -349,6 +367,11 @@ export function createApiClient(token: string | null) {
       f<{ temporaryPassword: string }>(`/users/${id}/reset-password`, { method: 'POST' }),
     changePassword: (data: { currentPassword: string; newPassword: string }) =>
       f<{ ok: boolean }>('/auth/change-password', { method: 'POST', body: JSON.stringify(data) }),
+
+    // Org-wide settings
+    getSettings: () => f<OrgSettings>('/settings'),
+    updateSettings: (data: { baseCurrency: string }) =>
+      f<OrgSettings>('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
   };
 }
 

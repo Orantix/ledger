@@ -144,15 +144,19 @@ model ClassificationRule {
   @@map("classification_rules")
 }
 
-// The plain-language entry a non-accountant makes. Never edited after posting;
-// this is the audit trail's starting point alongside its attachments.
+// The plain-language entry a non-accountant makes. Freely editable while
+// PENDING_REVIEW/DRAFT (nothing's hit the ledger yet); once POSTED it's
+// locked — that's the audit trail's starting point, and corrections from
+// there go through a reversing journal entry instead.
 model Capture {
   id             String        @id @default(cuid())
   description    String
   amount         Decimal       @db.Decimal(14, 2)
   currency       String        @default("LKR")
-  // Rate to the entity's base currency, applied at posting time. 1 when
-  // currency == base currency. Manually entered — no external FX dependency.
+  // Rate to the entity's base currency (OrgSettings.baseCurrency), applied
+  // at posting time. 1 when currency == base currency. Manually entered —
+  // no external FX dependency — and required whenever currency differs
+  // from the base currency, so it never silently defaults to 1.
   exchangeRate   Decimal       @db.Decimal(14, 6) @default(1)
   date           DateTime
   paymentMethod  PaymentMethod
@@ -317,4 +321,16 @@ model Budget {
 
   @@unique([accountId, month])
   @@map("budgets")
+}
+
+// Single-row, entity-wide configuration. Every capture's exchange rate is
+// "rate to this currency" — it's deliberately not per-user or per-capture,
+// since the whole point is one consistent conversion target for the books.
+model OrgSettings {
+  id           String   @id @default("default")
+  baseCurrency String   @default("LKR")
+  updatedBy    String?
+  updatedAt    DateTime @updatedAt
+
+  @@map("org_settings")
 }

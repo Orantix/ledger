@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UploadedFile,
@@ -16,6 +17,7 @@ import { randomUUID } from 'crypto';
 import { CaptureStatus, Role } from '@prisma/client';
 import { CapturesService } from './captures.service';
 import { CreateCaptureDto } from './dto/create-capture.dto';
+import { UpdateCaptureDto } from './dto/update-capture.dto';
 import { ReviewClassifyDto } from './dto/review-classify.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -41,6 +43,15 @@ export class CapturesController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.capturesService.findOne(id);
+  }
+
+  // Same roles as /classify — editing a capture is part of the review
+  // workflow, and it's only ever allowed before posting (enforced in the
+  // service).
+  @Patch(':id')
+  @Roles(Role.BOOKKEEPER, Role.OWNER, Role.ADMIN)
+  update(@Param('id') id: string, @Body() dto: UpdateCaptureDto, @CurrentUser() user: JwtPayload) {
+    return this.capturesService.update(id, dto, user.email);
   }
 
   @Post(':id/attachments')

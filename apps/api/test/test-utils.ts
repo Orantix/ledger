@@ -15,4 +15,5 @@ export async function cleanDatabase(prisma: PrismaService) {
   await prisma.capitalCommitment.deleteMany();
   await prisma.budget.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.orgSettings.deleteMany();
 }

@@ -13,6 +13,7 @@ const LINKS: { href: string; label: string; roles?: string[] }[] = [
   { href: '/dashboard', label: 'Dashboard', roles: ['OWNER', 'ADMIN', 'ACCOUNTANT', 'BOOKKEEPER'] },
   { href: '/fs-mappings', label: 'FS mappings', roles: ['ACCOUNTANT', 'ADMIN'] },
   { href: '/users', label: 'Users', roles: ['ADMIN'] },
+  { href: '/settings', label: 'Settings', roles: ['OWNER', 'ADMIN'] },
 ];
 
 function Brand() {

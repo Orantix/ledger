@@ -111,4 +111,65 @@ describe('CapturesService', () => {
     });
     expect(rule).not.toBeNull();
   });
+
+  it('rejects a non-base-currency capture with no exchange rate instead of silently defaulting to 1', async () => {
+    await expect(
+      captures.create(
+        {
+          description: 'AWS (USD invoice)',
+          amount: 42.5,
+          date: '2026-01-10',
+          paymentMethod: PaymentMethod.BANK,
+          category: 'hosting',
+          currency: 'USD',
+        },
+        'test',
+      ),
+    ).rejects.toThrow(/exchange rate/i);
+  });
+
+  it('forces exchangeRate to 1 for base-currency captures regardless of what was sent', async () => {
+    const capture = await captures.create(
+      {
+        description: 'AWS',
+        amount: 42.5,
+        date: '2026-01-10',
+        paymentMethod: PaymentMethod.BANK,
+        category: 'hosting',
+        currency: 'LKR',
+        exchangeRate: 300,
+      },
+      'test',
+    );
+    expect(Number((capture as any).exchangeRate)).toBe(1);
+  });
+
+  it('lets a bookkeeper correct a wrong exchange rate on a PENDING_REVIEW capture', async () => {
+    const capture = await captures.create(
+      {
+        description: 'Mystery USD expense',
+        amount: 100,
+        date: '2026-01-10',
+        paymentMethod: PaymentMethod.BANK,
+        category: 'unknown-category',
+        currency: 'USD',
+        exchangeRate: 300,
+      },
+      'test',
+    );
+    expect(capture.status).toBe('PENDING_REVIEW');
+
+    const updated = await captures.update(capture.id, { exchangeRate: 310.25 }, 'test');
+    expect(Number((updated as any).exchangeRate)).toBe(310.25);
+  });
+
+  it('refuses to edit a capture that has already been posted', async () => {
+    const capture = await captures.create(
+      { description: 'AWS', amount: 42.5, date: '2026-01-10', paymentMethod: PaymentMethod.BANK, category: 'hosting' },
+      'test',
+    );
+    expect(capture.status).toBe('POSTED');
+
+    await expect(captures.update(capture.id, { description: 'AWS (edited)' }, 'test')).rejects.toThrow(/already been posted/i);
+  });
 });

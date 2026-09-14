@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRequireAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
@@ -8,7 +8,6 @@ import { useToast } from '@/lib/toast';
 import { Attachment, PaymentMethod } from '@/lib/api';
 
 const TODAY = new Date().toISOString().slice(0, 10);
-const BASE_CURRENCY = 'LKR';
 const CONFIDENCE_THRESHOLD = 0.6;
 
 export default function NewCapturePage() {
@@ -17,15 +16,30 @@ export default function NewCapturePage() {
   const router = useRouter();
   const toast = useToast();
 
+  // Set from /settings, not hardcoded — a deployment outside Sri Lanka
+  // configures its own base currency under Settings.
+  const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
+
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(TODAY);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('BANK');
   const [category, setCategory] = useState('');
   const [notes, setNotes] = useState('');
-  const [currency, setCurrency] = useState(BASE_CURRENCY);
-  const [exchangeRate, setExchangeRate] = useState('1');
+  const [currency, setCurrency] = useState('');
+  // No default of "1" here on purpose — a real value has to be typed in
+  // whenever the currency differs from base, so a rushed OCR confirmation
+  // can't silently submit an unrelated currency at a 1:1 rate.
+  const [exchangeRate, setExchangeRate] = useState('');
   const [shareholderName, setShareholderName] = useState('');
+
+  useEffect(() => {
+    if (!ready || !token) return;
+    api.getSettings().then((s) => {
+      setBaseCurrency(s.baseCurrency);
+      setCurrency((c) => c || s.baseCurrency);
+    });
+  }, [ready, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -35,6 +49,7 @@ export default function NewCapturePage() {
   const [error, setError] = useState<string | null>(null);
 
   if (!ready || !token) return null;
+  if (!baseCurrency) return <p className="empty">Loading…</p>;
 
   async function onFileSelected(file: File | null) {
     if (!file) {
@@ -58,7 +73,11 @@ export default function NewCapturePage() {
         setDate(uploaded.extractedDate.slice(0, 10));
       }
       if (uploaded.extractedCurrency && (conf?.currency ?? 0) >= CONFIDENCE_THRESHOLD) {
+        // OCR never extracts a rate (see the exchange-rate field below) —
+        // reset it so a currency switch can't inherit a stale/unrelated
+        // value and read as if it were already confirmed.
         setCurrency(uploaded.extractedCurrency);
+        setExchangeRate('');
       }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed');
@@ -80,7 +99,7 @@ export default function NewCapturePage() {
         category,
         notes: notes || undefined,
         currency,
-        exchangeRate: currency !== BASE_CURRENCY ? Number(exchangeRate) : 1,
+        exchangeRate: currency !== baseCurrency ? Number(exchangeRate) : 1,
         shareholderName: paymentMethod === 'PERSONAL' && shareholderName ? shareholderName : undefined,
         attachmentIds: attachment ? [attachment.id] : undefined,
       });
@@ -161,14 +180,15 @@ export default function NewCapturePage() {
               Currency
               <input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={3} />
             </label>
-            {currency !== BASE_CURRENCY && (
+            {currency !== baseCurrency && (
               <label>
-                Exchange rate to {BASE_CURRENCY}
+                Exchange rate to {baseCurrency}
                 <input
                   required
                   type="number"
                   step="0.000001"
                   min="0.000001"
+                  placeholder="e.g. 300.50"
                   value={exchangeRate}
                   onChange={(e) => setExchangeRate(e.target.value)}
                 />
