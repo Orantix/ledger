@@ -72,7 +72,7 @@ export class JournalService {
 
   findAll() {
     return this.prisma.journalEntry.findMany({
-      include: { lines: { include: { account: true } }, capture: true },
+      include: { lines: { include: { account: true } }, capture: true, reversedBy: true },
       orderBy: { date: 'desc' },
     });
   }
@@ -80,7 +80,7 @@ export class JournalService {
   findOne(id: string) {
     return this.prisma.journalEntry.findUniqueOrThrow({
       where: { id },
-      include: { lines: { include: { account: true } }, capture: true },
+      include: { lines: { include: { account: true } }, capture: true, reversedBy: true },
     });
   }
 

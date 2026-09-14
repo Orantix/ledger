@@ -53,6 +53,9 @@ export interface JournalEntry {
   date: string;
   description: string;
   status: 'POSTED' | 'REVERSED';
+  reversalOfId?: string | null;
+  reversedBy?: { id: string } | null;
+  capture?: { id: string; description: string } | null;
   lines: JournalLine[];
 }
 

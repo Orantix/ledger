@@ -9,6 +9,7 @@ const LINKS: { href: string; label: string; roles?: string[] }[] = [
   { href: '/', label: 'Captures' },
   { href: '/capture/new', label: 'New capture' },
   { href: '/trial-balance', label: 'Trial balance' },
+  { href: '/journal-entries', label: 'Journal entries', roles: ['OWNER', 'ADMIN', 'ACCOUNTANT', 'BOOKKEEPER'] },
   { href: '/periods', label: 'Financial statements', roles: ['OWNER', 'ADMIN', 'ACCOUNTANT', 'BOOKKEEPER'] },
   { href: '/dashboard', label: 'Dashboard', roles: ['OWNER', 'ADMIN', 'ACCOUNTANT', 'BOOKKEEPER'] },
   { href: '/fs-mappings', label: 'FS mappings', roles: ['ACCOUNTANT', 'ADMIN'] },

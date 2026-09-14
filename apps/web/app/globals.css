@@ -395,6 +395,11 @@ tbody tr:hover {
   color: var(--muted);
 }
 
+.badge.reversed {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 /* --- Forms --- */
 
 form {
