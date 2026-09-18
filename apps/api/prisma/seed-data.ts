@@ -37,6 +37,19 @@ export const RULES: { category: string; paymentMethod: PaymentMethod; expenseCod
   { category: 'travel', paymentMethod: PaymentMethod.PERSONAL, expenseCode: '5400', paymentCode: '2100' },
 ];
 
+// Starter revenue rules. paymentMethod here means "how it was received":
+// BANK -> straight into the receiving account, CREDIT -> that account is a
+// receivable (the customer owes it), never PERSONAL.
+export const REVENUE_RULES: {
+  category: string;
+  paymentMethod: PaymentMethod;
+  revenueCode: string;
+  receivingCode: string;
+}[] = [
+  { category: 'consulting services', paymentMethod: PaymentMethod.BANK, revenueCode: '4000', receivingCode: '1000' },
+  { category: 'consulting services', paymentMethod: PaymentMethod.CREDIT, revenueCode: '4000', receivingCode: '1100' },
+];
+
 // FS presentation mapping per account. cashFlowCategory only matters for
 // accounts that appear as the *counter*-account to a cash movement.
 export const FS_MAPPINGS: {
@@ -176,6 +189,27 @@ export async function seedAccountsRulesAndMappings(prisma: PrismaClient) {
     });
   }
 
+  for (const rule of REVENUE_RULES) {
+    const revenueAccountId = accountByCode.get(rule.revenueCode);
+    const receivingAccountId = accountByCode.get(rule.receivingCode);
+    if (!revenueAccountId || !receivingAccountId) {
+      throw new Error(`Missing account for revenue rule ${rule.category}/${rule.paymentMethod}`);
+    }
+    const existing = await prisma.revenueClassificationRule.findFirst({
+      where: { category: rule.category, paymentMethod: rule.paymentMethod },
+    });
+    if (existing) continue;
+    await prisma.revenueClassificationRule.create({
+      data: {
+        category: rule.category,
+        paymentMethod: rule.paymentMethod,
+        revenueAccountId,
+        receivingAccountId,
+        version: 1,
+      },
+    });
+  }
+
   for (const mapping of FS_MAPPINGS) {
     const accountId = accountByCode.get(mapping.code);
     if (!accountId) throw new Error(`Missing account for FS mapping ${mapping.code}`);
@@ -194,5 +228,10 @@ export async function seedAccountsRulesAndMappings(prisma: PrismaClient) {
     });
   }
 
-  return { accountCount: ACCOUNTS.length, ruleCount: RULES.length, mappingCount: FS_MAPPINGS.length };
+  return {
+    accountCount: ACCOUNTS.length,
+    ruleCount: RULES.length,
+    revenueRuleCount: REVENUE_RULES.length,
+    mappingCount: FS_MAPPINGS.length,
+  };
 }

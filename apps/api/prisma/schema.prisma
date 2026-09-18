@@ -26,6 +26,16 @@ enum PaymentMethod {
   CREDIT
 }
 
+enum CaptureType {
+  // Money going out: debit the expense/asset account, credit however it
+  // was paid. The original, and still default, shape.
+  EXPENSE
+  // Money coming in: debit however it was received, credit the revenue
+  // account — the reverse direction. PERSONAL isn't a valid PaymentMethod
+  // here (there's no "received via my own money" case).
+  REVENUE
+}
+
 enum CaptureStatus {
   DRAFT
   PENDING_REVIEW
@@ -115,10 +125,12 @@ model Account {
   isCash    Boolean     @default(false)
   createdAt DateTime    @default(now())
 
-  journalLines           JournalLine[]
-  rulesAsExpenseAccount  ClassificationRule[] @relation("ExpenseAccount")
-  rulesAsPaymentAccount  ClassificationRule[] @relation("PaymentAccount")
-  fsMappings             AccountFsMapping[]
+  journalLines             JournalLine[]
+  rulesAsExpenseAccount    ClassificationRule[]        @relation("ExpenseAccount")
+  rulesAsPaymentAccount    ClassificationRule[]        @relation("PaymentAccount")
+  rulesAsRevenueAccount    RevenueClassificationRule[] @relation("RevenueAccount")
+  rulesAsReceivingAccount  RevenueClassificationRule[] @relation("ReceivingAccount")
+  fsMappings               AccountFsMapping[]
 
   @@map("accounts")
 }
@@ -144,12 +156,42 @@ model ClassificationRule {
   @@map("classification_rules")
 }
 
+// The revenue-side mirror of ClassificationRule — a separate table (not
+// overloaded fields on the same one) so "expenseAccountId" never secretly
+// means a revenue account, and an expense category and a revenue category
+// can share the same name without colliding. paymentMethod reuses the same
+// enum: BANK = received straight into that account, CREDIT = the customer
+// owes it (receivingAccount is then a receivable, not cash).
+model RevenueClassificationRule {
+  id                 String        @id @default(cuid())
+  category           String
+  paymentMethod      PaymentMethod
+  revenueAccount     Account       @relation("RevenueAccount", fields: [revenueAccountId], references: [id])
+  revenueAccountId   String
+  receivingAccount   Account       @relation("ReceivingAccount", fields: [receivingAccountId], references: [id])
+  receivingAccountId String
+  version            Int           @default(1)
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+
+  captures  Capture[]
+
+  @@unique([category, paymentMethod, version])
+  @@index([category, paymentMethod, isActive])
+  @@map("revenue_classification_rules")
+}
+
 // The plain-language entry a non-accountant makes. Freely editable while
 // PENDING_REVIEW/DRAFT (nothing's hit the ledger yet); once POSTED it's
 // locked — that's the audit trail's starting point, and corrections from
 // there go through a reversing journal entry instead.
 model Capture {
   id             String        @id @default(cuid())
+  // EXPENSE (default) or REVENUE — fixed at creation, never edited: it
+  // decides which classification-rule table and account direction apply,
+  // and flipping it after the fact would leave appliedRule(Id) pointing at
+  // the wrong table. Pick the right one at creation instead.
+  type           CaptureType   @default(EXPENSE)
   description    String
   amount         Decimal       @db.Decimal(14, 2)
   currency       String        @default("LKR")
@@ -163,8 +205,12 @@ model Capture {
   category       String
   notes          String?
   // Who the personal-draw / related-party side belongs to. Only meaningful
-  // for PERSONAL payment method and capital-related captures.
+  // for EXPENSE captures with PERSONAL payment method and capital-related
+  // captures.
   shareholderName String?
+  // Who owes it, for a REVENUE capture with paymentMethod CREDIT (an
+  // unpaid customer invoice). The revenue-side mirror of shareholderName.
+  customerName    String?
   status         CaptureStatus @default(DRAFT)
   reviewReason   ReviewReason?
   createdBy      String
@@ -172,6 +218,9 @@ model Capture {
 
   appliedRule   ClassificationRule? @relation(fields: [appliedRuleId], references: [id])
   appliedRuleId String?
+
+  appliedRevenueRule   RevenueClassificationRule? @relation(fields: [appliedRevenueRuleId], references: [id])
+  appliedRevenueRuleId String?
 
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
   journalEntryId String?       @unique

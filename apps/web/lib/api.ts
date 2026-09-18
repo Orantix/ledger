@@ -2,6 +2,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 export type AccountType = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
 export type PaymentMethod = 'BANK' | 'PERSONAL' | 'CREDIT';
+export type CaptureType = 'EXPENSE' | 'REVENUE';
 export type CaptureStatus = 'DRAFT' | 'PENDING_REVIEW' | 'POSTED';
 export type ReviewReason = 'NO_RULE' | 'SENSITIVE_ACCOUNT' | 'UNUSUAL_AMOUNT';
 export type FsStatement = 'INCOME_STATEMENT' | 'BALANCE_SHEET';
@@ -67,8 +68,17 @@ export interface ClassificationRule {
   paymentAccount: Account;
 }
 
+export interface RevenueClassificationRule {
+  id: string;
+  category: string;
+  paymentMethod: PaymentMethod;
+  revenueAccount: Account;
+  receivingAccount: Account;
+}
+
 export interface Capture {
   id: string;
+  type: CaptureType;
   description: string;
   amount: string;
   currency: string;
@@ -78,11 +88,13 @@ export interface Capture {
   category: string;
   notes?: string | null;
   shareholderName?: string | null;
+  customerName?: string | null;
   status: CaptureStatus;
   reviewReason?: ReviewReason | null;
   createdAt: string;
   attachments: Attachment[];
   appliedRule?: ClassificationRule | null;
+  appliedRevenueRule?: RevenueClassificationRule | null;
   journalEntry?: JournalEntry | null;
 }
 
@@ -202,7 +214,12 @@ function extractErrorMessage(body: string): string | null {
   return null;
 }
 
-async function apiFetch<T>(token: string | null, path: string, init?: RequestInit): Promise<T> {
+async function apiFetch<T>(
+  token: string | null,
+  path: string,
+  init?: RequestInit,
+  onUnauthorized?: () => void,
+): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     cache: 'no-store',
@@ -213,6 +230,13 @@ async function apiFetch<T>(token: string | null, path: string, init?: RequestIni
     },
   });
   if (!res.ok) {
+    // A 401 while we had a token means the session itself is no longer
+    // valid (expired/invalid JWT) — not just this one request failing.
+    // Only fires when we actually sent a token, so a plain "not logged in
+    // yet" 401 on a public/pre-auth call doesn't trigger it.
+    if (res.status === 401 && token) {
+      onUnauthorized?.();
+    }
     const body = await res.text();
     throw new ApiError(res.status, extractErrorMessage(body) ?? `Request failed (${res.status})`);
   }
@@ -220,14 +244,15 @@ async function apiFetch<T>(token: string | null, path: string, init?: RequestIni
   return res.json() as Promise<T>;
 }
 
-export function createApiClient(token: string | null) {
-  const f = <T>(path: string, init?: RequestInit) => apiFetch<T>(token, path, init);
+export function createApiClient(token: string | null, onUnauthorized?: () => void) {
+  const f = <T>(path: string, init?: RequestInit) => apiFetch<T>(token, path, init, onUnauthorized);
 
   return {
     // Captures
     listCaptures: (status?: CaptureStatus) => f<Capture[]>(`/captures${status ? `?status=${status}` : ''}`),
     getCapture: (id: string) => f<Capture>(`/captures/${id}`),
     createCapture: (data: {
+      type?: CaptureType;
       description: string;
       amount: number;
       date: string;
@@ -237,12 +262,17 @@ export function createApiClient(token: string | null) {
       currency?: string;
       exchangeRate?: number;
       shareholderName?: string;
+      customerName?: string;
       attachmentIds?: string[];
     }) => f<Capture>('/captures', { method: 'POST', body: JSON.stringify(data) }),
     classifyCapture: (
       id: string,
       data: { expenseAccountId: string; paymentAccountId: string; saveAsRule?: boolean },
     ) => f<Capture>(`/captures/${id}/classify`, { method: 'POST', body: JSON.stringify(data) }),
+    classifyRevenueCapture: (
+      id: string,
+      data: { revenueAccountId: string; receivingAccountId: string; saveAsRule?: boolean },
+    ) => f<Capture>(`/captures/${id}/classify-revenue`, { method: 'POST', body: JSON.stringify(data) }),
     updateCapture: (
       id: string,
       data: Partial<{
@@ -255,6 +285,7 @@ export function createApiClient(token: string | null) {
         currency: string;
         exchangeRate: number;
         shareholderName: string;
+        customerName: string;
       }>,
     ) => f<Capture>(`/captures/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
@@ -267,7 +298,10 @@ export function createApiClient(token: string | null) {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: formData,
       });
-      if (!res.ok) throw new ApiError(res.status, await res.text());
+      if (!res.ok) {
+        if (res.status === 401 && token) onUnauthorized?.();
+        throw new ApiError(res.status, await res.text());
+      }
       return res.json();
     },
     attachmentFileUrl: (id: string) => `${API_URL}/attachments/${id}/file`,
@@ -277,6 +311,7 @@ export function createApiClient(token: string | null) {
 
     // Classification rules
     listRules: () => f<ClassificationRule[]>('/classification-rules'),
+    listRevenueRules: () => f<RevenueClassificationRule[]>('/classification-rules/revenue'),
 
     // Journal / trial balance
     listJournalEntries: () => f<JournalEntry[]>('/journal-entries'),

@@ -2,7 +2,9 @@ import { IsEnum, IsISO8601, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsStri
 import { PaymentMethod } from '@prisma/client';
 
 // Same shape as CreateCaptureDto, minus attachmentIds (attachments aren't
-// re-linked on edit) — every field optional since this is a partial update.
+// re-linked on edit) and `type` (fixed at creation — see the schema
+// comment on Capture.type for why) — every other field optional since this
+// is a partial update.
 export class UpdateCaptureDto {
   @IsString()
   @IsNotEmpty()
@@ -43,4 +45,8 @@ export class UpdateCaptureDto {
   @IsString()
   @IsOptional()
   shareholderName?: string;
+
+  @IsString()
+  @IsOptional()
+  customerName?: string;
 }

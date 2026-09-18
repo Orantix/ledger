@@ -8,9 +8,15 @@ import {
   IsPositive,
   IsString,
 } from 'class-validator';
-import { PaymentMethod } from '@prisma/client';
+import { CaptureType, PaymentMethod } from '@prisma/client';
 
 export class CreateCaptureDto {
+  // Defaults to EXPENSE when omitted, so every existing caller keeps working
+  // unchanged.
+  @IsEnum(CaptureType)
+  @IsOptional()
+  type?: CaptureType;
+
   @IsString()
   @IsNotEmpty()
   description!: string;
@@ -45,6 +51,12 @@ export class CreateCaptureDto {
   @IsString()
   @IsOptional()
   shareholderName?: string;
+
+  // Only meaningful for a REVENUE capture with paymentMethod CREDIT — who
+  // owes it.
+  @IsString()
+  @IsOptional()
+  customerName?: string;
 
   // Attachments uploaded ahead of the capture (e.g. via OCR pre-fill) get
   // linked to it at creation time.

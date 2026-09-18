@@ -5,10 +5,13 @@ import { useRouter } from 'next/navigation';
 import { useRequireAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
 import { useToast } from '@/lib/toast';
-import { Attachment, PaymentMethod } from '@/lib/api';
+import { Attachment, CaptureType, PaymentMethod } from '@/lib/api';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const CONFIDENCE_THRESHOLD = 0.6;
+
+const EXPENSE_CATEGORIES = ['hosting', 'subscriptions', 'legal fees', 'office supplies', 'software', 'travel'];
+const REVENUE_CATEGORIES = ['consulting services', 'product sales'];
 
 export default function NewCapturePage() {
   const { ready, token } = useRequireAuth();
@@ -20,6 +23,7 @@ export default function NewCapturePage() {
   // configures its own base currency under Settings.
   const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
 
+  const [type, setType] = useState<CaptureType>('EXPENSE');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(TODAY);
@@ -32,6 +36,7 @@ export default function NewCapturePage() {
   // can't silently submit an unrelated currency at a 1:1 rate.
   const [exchangeRate, setExchangeRate] = useState('');
   const [shareholderName, setShareholderName] = useState('');
+  const [customerName, setCustomerName] = useState('');
 
   useEffect(() => {
     if (!ready || !token) return;
@@ -50,6 +55,21 @@ export default function NewCapturePage() {
 
   if (!ready || !token) return null;
   if (!baseCurrency) return <p className="empty">Loading…</p>;
+
+  const isRevenue = type === 'REVENUE';
+
+  function onTypeChange(next: CaptureType) {
+    setType(next);
+    // PERSONAL only makes sense for money going out — switching to
+    // revenue with it selected would otherwise get silently rejected on
+    // submit with no visible reason why.
+    if (next === 'REVENUE' && paymentMethod === 'PERSONAL') {
+      setPaymentMethod('BANK');
+    }
+    setShareholderName('');
+    setCustomerName('');
+    setCategory('');
+  }
 
   async function onFileSelected(file: File | null) {
     if (!file) {
@@ -92,6 +112,7 @@ export default function NewCapturePage() {
     setError(null);
     try {
       const created = await api.createCapture({
+        type,
         description,
         amount: Number(amount),
         date,
@@ -100,7 +121,8 @@ export default function NewCapturePage() {
         notes: notes || undefined,
         currency,
         exchangeRate: currency !== baseCurrency ? Number(exchangeRate) : 1,
-        shareholderName: paymentMethod === 'PERSONAL' && shareholderName ? shareholderName : undefined,
+        shareholderName: !isRevenue && paymentMethod === 'PERSONAL' && shareholderName ? shareholderName : undefined,
+        customerName: isRevenue && paymentMethod === 'CREDIT' && customerName ? customerName : undefined,
         attachmentIds: attachment ? [attachment.id] : undefined,
       });
       toast.show(
@@ -122,13 +144,34 @@ export default function NewCapturePage() {
     <>
       <h1>New capture</h1>
       <p className="subtitle">
-        Attach a receipt to pre-fill the details, or just type them. Either way, tell us how it was paid — no
-        accounting knowledge needed.
+        Attach a document to pre-fill the details, or just type them. Either way, no accounting knowledge needed.
       </p>
 
       <div className="card">
+        <label>Direction</label>
+        <div className="row" role="group" aria-label="Direction">
+          <button
+            type="button"
+            className={type === 'EXPENSE' ? '' : 'secondary'}
+            onClick={() => onTypeChange('EXPENSE')}
+            style={{ flex: 1 }}
+          >
+            Money out (expense)
+          </button>
+          <button
+            type="button"
+            className={type === 'REVENUE' ? '' : 'secondary'}
+            onClick={() => onTypeChange('REVENUE')}
+            style={{ flex: 1 }}
+          >
+            Money in (revenue)
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
         <label>
-          Attach receipt / invoice / bill (optional — extracts details automatically)
+          {isRevenue ? 'Attach the invoice or receipt you sent (optional — extracts details automatically)' : 'Attach receipt / invoice / bill (optional — extracts details automatically)'}
           <input
             type="file"
             accept="application/pdf,image/png,image/jpeg,image/webp"
@@ -148,10 +191,11 @@ export default function NewCapturePage() {
       <div className="card">
         <form onSubmit={onSubmit}>
           <label>
-            What was this for? {lowConfidence('vendor') && <em>(low-confidence guess — please check)</em>}
+            {isRevenue ? 'What was this income for?' : 'What was this for?'}{' '}
+            {lowConfidence('vendor') && <em>(low-confidence guess — please check)</em>}
             <input
               required
-              placeholder="e.g. AWS hosting for October"
+              placeholder={isRevenue ? 'e.g. Consulting for Acme Co' : 'e.g. AWS hosting for October'}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -197,15 +241,15 @@ export default function NewCapturePage() {
           </div>
 
           <label>
-            How was it paid?
+            {isRevenue ? 'How was it received?' : 'How was it paid?'}
             <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
               <option value="BANK">Company bank</option>
-              <option value="PERSONAL">My own money (personal draw)</option>
-              <option value="CREDIT">Unpaid / on credit</option>
+              {!isRevenue && <option value="PERSONAL">My own money (personal draw)</option>}
+              <option value="CREDIT">{isRevenue ? 'Not yet — customer owes us' : 'Unpaid / on credit'}</option>
             </select>
           </label>
 
-          {paymentMethod === 'PERSONAL' && (
+          {!isRevenue && paymentMethod === 'PERSONAL' && (
             <label>
               Whose money was this? (optional, tracks the related-party balance)
               <input
@@ -216,22 +260,30 @@ export default function NewCapturePage() {
             </label>
           )}
 
+          {isRevenue && paymentMethod === 'CREDIT' && (
+            <label>
+              Which customer owes this? (optional, tracks the receivable)
+              <input
+                placeholder="e.g. Acme Co"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+              />
+            </label>
+          )}
+
           <label>
             Category
             <input
               required
               list="category-options"
-              placeholder="e.g. hosting, legal fees, travel"
+              placeholder={isRevenue ? 'e.g. consulting services, product sales' : 'e.g. hosting, legal fees, travel'}
               value={category}
               onChange={(e) => setCategory(e.target.value)}
             />
             <datalist id="category-options">
-              <option value="hosting" />
-              <option value="subscriptions" />
-              <option value="legal fees" />
-              <option value="office supplies" />
-              <option value="software" />
-              <option value="travel" />
+              {(isRevenue ? REVENUE_CATEGORIES : EXPENSE_CATEGORIES).map((c) => (
+                <option key={c} value={c} />
+              ))}
             </datalist>
           </label>
 

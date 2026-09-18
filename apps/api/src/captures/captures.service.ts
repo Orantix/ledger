@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { CaptureStatus, Prisma, ReviewReason } from '@prisma/client';
+import { CaptureStatus, CaptureType, PaymentMethod, Prisma, ReviewReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { JournalService } from '../journal/journal.service';
 import { ClassificationService } from '../classification/classification.service';
@@ -7,12 +7,28 @@ import { SettingsService } from '../settings/settings.service';
 import { CreateCaptureDto } from './dto/create-capture.dto';
 import { UpdateCaptureDto } from './dto/update-capture.dto';
 import { ReviewClassifyDto } from './dto/review-classify.dto';
+import { ReviewClassifyRevenueDto } from './dto/review-classify-revenue.dto';
 
 // A capture posts on its own only when it's both a known category/payment
 // mapping AND an unremarkable amount for that category. Anything else waits
 // for a human, however confident the rule match was.
 const ANOMALY_MULTIPLIER = 3;
 const ANOMALY_MIN_HISTORY = 3;
+
+interface CaptureBaseData {
+  type: CaptureType;
+  description: string;
+  amount: number;
+  currency: string;
+  exchangeRate: number;
+  date: Date;
+  paymentMethod: PaymentMethod;
+  category: string;
+  notes?: string;
+  shareholderName?: string;
+  customerName?: string;
+  createdBy: string;
+}
 
 @Injectable()
 export class CapturesService {
@@ -40,20 +56,26 @@ export class CapturesService {
     return exchangeRate;
   }
 
+  // Shared by both directions: any account either side resolves to can
+  // force review, and the amount-anomaly check compares against history of
+  // the same category AND direction (an expense category and a revenue
+  // category can otherwise share a name without polluting each other's
+  // average).
   private async decideReviewReason(
     normalizedCategory: string,
     amount: number,
-    resolved: { expenseAccountId: string; paymentAccountId: string },
+    type: CaptureType,
+    accountIds: string[],
   ): Promise<ReviewReason | null> {
     const accounts = await this.prisma.account.findMany({
-      where: { id: { in: [resolved.expenseAccountId, resolved.paymentAccountId] } },
+      where: { id: { in: accountIds } },
     });
     if (accounts.some((a) => a.sensitive)) {
       return ReviewReason.SENSITIVE_ACCOUNT;
     }
 
     const history = await this.prisma.capture.aggregate({
-      where: { category: normalizedCategory, status: CaptureStatus.POSTED },
+      where: { category: normalizedCategory, type, status: CaptureStatus.POSTED },
       _avg: { amount: true },
       _count: true,
     });
@@ -67,23 +89,36 @@ export class CapturesService {
     return null;
   }
 
+  private async linkAttachments(tx: Prisma.TransactionClient, captureId: string, attachmentIds?: string[]) {
+    if (!attachmentIds?.length) return;
+    await tx.attachment.updateMany({
+      where: { id: { in: attachmentIds } },
+      data: { captureId },
+    });
+  }
+
   // The heart of the pipeline: a plain-language capture either matches a
   // known rule and clears every confidence check (posts straight to the
   // ledger), or it waits in the review queue for a human. Nothing posts on
   // a guess, and sensitive accounts / unusual amounts never skip review
-  // even with a deterministic rule match.
+  // even with a deterministic rule match. Dispatches on `type` — EXPENSE
+  // (the default, for backward compatibility) and REVENUE post in opposite
+  // debit/credit directions against entirely separate rule tables.
   async create(dto: CreateCaptureDto, createdBy: string) {
-    const normalizedCategory = dto.category.trim().toLowerCase();
-    const resolved = await this.classificationService.resolveRule(normalizedCategory, dto.paymentMethod);
-    const reviewReason = resolved
-      ? await this.decideReviewReason(normalizedCategory, dto.amount, resolved)
-      : ReviewReason.NO_RULE;
+    const type = dto.type ?? CaptureType.EXPENSE;
+    if (type === CaptureType.REVENUE && dto.paymentMethod === PaymentMethod.PERSONAL) {
+      throw new BadRequestException(
+        'Revenue can only be received via bank or on credit — PERSONAL doesn’t apply to money coming in.',
+      );
+    }
 
+    const normalizedCategory = dto.category.trim().toLowerCase();
     const baseCurrency = await this.settingsService.getBaseCurrency();
     const currency = dto.currency ?? baseCurrency;
     const exchangeRate = this.resolveExchangeRate(currency, dto.exchangeRate, baseCurrency);
 
-    const baseData = {
+    const baseData: CaptureBaseData = {
+      type,
       description: dto.description,
       amount: dto.amount,
       currency,
@@ -93,8 +128,23 @@ export class CapturesService {
       category: normalizedCategory,
       notes: dto.notes,
       shareholderName: dto.shareholderName,
+      customerName: dto.customerName,
       createdBy,
     };
+
+    return type === CaptureType.REVENUE
+      ? this.createRevenue(dto, normalizedCategory, baseData)
+      : this.createExpense(dto, normalizedCategory, baseData);
+  }
+
+  private async createExpense(dto: CreateCaptureDto, normalizedCategory: string, baseData: CaptureBaseData) {
+    const resolved = await this.classificationService.resolveRule(normalizedCategory, dto.paymentMethod);
+    const reviewReason = resolved
+      ? await this.decideReviewReason(normalizedCategory, dto.amount, CaptureType.EXPENSE, [
+          resolved.expenseAccountId,
+          resolved.paymentAccountId,
+        ])
+      : ReviewReason.NO_RULE;
 
     return this.prisma.$transaction(async (tx) => {
       if (!resolved || reviewReason) {
@@ -106,29 +156,19 @@ export class CapturesService {
             appliedRuleId: resolved?.ruleId,
           },
         });
-        if (dto.attachmentIds?.length) {
-          await tx.attachment.updateMany({
-            where: { id: { in: dto.attachmentIds } },
-            data: { captureId: capture.id },
-          });
-        }
+        await this.linkAttachments(tx, capture.id, dto.attachmentIds);
         return capture;
       }
 
       const capture = await tx.capture.create({ data: { ...baseData, status: CaptureStatus.DRAFT } });
-      if (dto.attachmentIds?.length) {
-        await tx.attachment.updateMany({
-          where: { id: { in: dto.attachmentIds } },
-          data: { captureId: capture.id },
-        });
-      }
+      await this.linkAttachments(tx, capture.id, dto.attachmentIds);
 
-      const baseAmount = round2(dto.amount * exchangeRate);
+      const baseAmount = round2(dto.amount * baseData.exchangeRate);
       const entry = await this.journalService.postEntry(
         {
           date: baseData.date,
           description: `${normalizedCategory}: ${dto.description}`,
-          createdBy,
+          createdBy: baseData.createdBy,
           lines: [
             { accountId: resolved.expenseAccountId, debit: baseAmount, credit: 0 },
             { accountId: resolved.paymentAccountId, debit: 0, credit: baseAmount },
@@ -149,6 +189,63 @@ export class CapturesService {
     });
   }
 
+  private async createRevenue(dto: CreateCaptureDto, normalizedCategory: string, baseData: CaptureBaseData) {
+    const resolved = await this.classificationService.resolveRevenueRule(normalizedCategory, dto.paymentMethod);
+    const reviewReason = resolved
+      ? await this.decideReviewReason(normalizedCategory, dto.amount, CaptureType.REVENUE, [
+          resolved.revenueAccountId,
+          resolved.receivingAccountId,
+        ])
+      : ReviewReason.NO_RULE;
+
+    return this.prisma.$transaction(async (tx) => {
+      if (!resolved || reviewReason) {
+        const capture = await tx.capture.create({
+          data: {
+            ...baseData,
+            status: CaptureStatus.PENDING_REVIEW,
+            reviewReason,
+            appliedRevenueRuleId: resolved?.ruleId,
+          },
+        });
+        await this.linkAttachments(tx, capture.id, dto.attachmentIds);
+        return capture;
+      }
+
+      const capture = await tx.capture.create({ data: { ...baseData, status: CaptureStatus.DRAFT } });
+      await this.linkAttachments(tx, capture.id, dto.attachmentIds);
+
+      const baseAmount = round2(dto.amount * baseData.exchangeRate);
+      const entry = await this.journalService.postEntry(
+        {
+          date: baseData.date,
+          description: `${normalizedCategory}: ${dto.description}`,
+          createdBy: baseData.createdBy,
+          lines: [
+            // Reverse of the expense direction: debit however it was
+            // received (cash or a receivable), credit the revenue account.
+            { accountId: resolved.receivingAccountId, debit: baseAmount, credit: 0 },
+            { accountId: resolved.revenueAccountId, debit: 0, credit: baseAmount },
+          ],
+        },
+        tx,
+      );
+
+      return tx.capture.update({
+        where: { id: capture.id },
+        data: {
+          status: CaptureStatus.POSTED,
+          journalEntryId: entry.id,
+          appliedRevenueRuleId: resolved.ruleId,
+        },
+        include: {
+          journalEntry: { include: { lines: { include: { account: true } } } },
+          appliedRevenueRule: true,
+        },
+      });
+    });
+  }
+
   findAll(status?: CaptureStatus) {
     return this.prisma.capture.findMany({
       where: status ? { status } : undefined,
@@ -163,6 +260,7 @@ export class CapturesService {
       include: {
         attachments: true,
         appliedRule: { include: { expenseAccount: true, paymentAccount: true } },
+        appliedRevenueRule: { include: { revenueAccount: true, receivingAccount: true } },
         journalEntry: { include: { lines: { include: { account: true } } } },
       },
     });
@@ -177,6 +275,11 @@ export class CapturesService {
     if (capture.status === CaptureStatus.POSTED) {
       throw new BadRequestException(
         'This capture has already been posted to the ledger and can no longer be edited — reverse the journal entry instead.',
+      );
+    }
+    if (capture.type === CaptureType.REVENUE && dto.paymentMethod === PaymentMethod.PERSONAL) {
+      throw new BadRequestException(
+        'Revenue can only be received via bank or on credit — PERSONAL doesn’t apply to money coming in.',
       );
     }
 
@@ -200,10 +303,12 @@ export class CapturesService {
         category: dto.category ? dto.category.trim().toLowerCase() : capture.category,
         notes: dto.notes ?? capture.notes,
         shareholderName: dto.shareholderName ?? capture.shareholderName,
+        customerName: dto.customerName ?? capture.customerName,
       },
       include: {
         attachments: true,
         appliedRule: { include: { expenseAccount: true, paymentAccount: true } },
+        appliedRevenueRule: { include: { revenueAccount: true, receivingAccount: true } },
         journalEntry: { include: { lines: { include: { account: true } } } },
       },
     });
@@ -232,6 +337,9 @@ export class CapturesService {
     const capture = await this.prisma.capture.findUniqueOrThrow({ where: { id: captureId } });
     if (capture.status !== CaptureStatus.PENDING_REVIEW) {
       throw new BadRequestException(`Capture ${captureId} is not pending review`);
+    }
+    if (capture.type !== CaptureType.EXPENSE) {
+      throw new BadRequestException(`Capture ${captureId} is a revenue capture — use /classify-revenue instead`);
     }
 
     let ruleId: string | undefined;
@@ -266,6 +374,54 @@ export class CapturesService {
       return tx.capture.update({
         where: { id: captureId },
         data: { status: CaptureStatus.POSTED, journalEntryId: entry.id, appliedRuleId: ruleId },
+        include: { journalEntry: { include: { lines: { include: { account: true } } } } },
+      });
+    });
+  }
+
+  // Revenue-side mirror of classifyForReview: debit/credit direction is
+  // reversed and it teaches RevenueClassificationRule instead.
+  async classifyRevenueForReview(captureId: string, dto: ReviewClassifyRevenueDto, createdBy: string) {
+    const capture = await this.prisma.capture.findUniqueOrThrow({ where: { id: captureId } });
+    if (capture.status !== CaptureStatus.PENDING_REVIEW) {
+      throw new BadRequestException(`Capture ${captureId} is not pending review`);
+    }
+    if (capture.type !== CaptureType.REVENUE) {
+      throw new BadRequestException(`Capture ${captureId} is an expense capture — use /classify instead`);
+    }
+
+    let ruleId: string | undefined;
+    if (dto.saveAsRule) {
+      const rule = await this.classificationService.upsertRevenueRule({
+        category: capture.category,
+        paymentMethod: capture.paymentMethod,
+        revenueAccountId: dto.revenueAccountId,
+        receivingAccountId: dto.receivingAccountId,
+      });
+      ruleId = rule.id;
+    }
+
+    const amount = new Prisma.Decimal(capture.amount).toNumber();
+    const exchangeRate = new Prisma.Decimal(capture.exchangeRate).toNumber();
+    const baseAmount = round2(amount * exchangeRate);
+
+    return this.prisma.$transaction(async (tx) => {
+      const entry = await this.journalService.postEntry(
+        {
+          date: capture.date,
+          description: `${capture.category}: ${capture.description}`,
+          createdBy,
+          lines: [
+            { accountId: dto.receivingAccountId, debit: baseAmount, credit: 0 },
+            { accountId: dto.revenueAccountId, debit: 0, credit: baseAmount },
+          ],
+        },
+        tx,
+      );
+
+      return tx.capture.update({
+        where: { id: captureId },
+        data: { status: CaptureStatus.POSTED, journalEntryId: entry.id, appliedRevenueRuleId: ruleId },
         include: { journalEntry: { include: { lines: { include: { account: true } } } } },
       });
     });

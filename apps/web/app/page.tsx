@@ -69,8 +69,8 @@ export default function CapturesPage() {
                     </td>
                     <td>{c.category}</td>
                     <td>{c.paymentMethod}</td>
-                    <td className="num">
-                      {c.currency} {Number(c.amount).toFixed(2)}
+                    <td className="num" style={{ color: c.type === 'REVENUE' ? 'var(--chart-pos)' : undefined }}>
+                      {c.type === 'REVENUE' ? '+' : '−'} {c.currency} {Number(c.amount).toFixed(2)}
                     </td>
                     <td>
                       <StatusBadge status={c.status} />

@@ -19,6 +19,7 @@ import { CapturesService } from './captures.service';
 import { CreateCaptureDto } from './dto/create-capture.dto';
 import { UpdateCaptureDto } from './dto/update-capture.dto';
 import { ReviewClassifyDto } from './dto/review-classify.dto';
+import { ReviewClassifyRevenueDto } from './dto/review-classify-revenue.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/auth.service';
@@ -85,5 +86,11 @@ export class CapturesController {
   @Roles(Role.BOOKKEEPER, Role.OWNER, Role.ADMIN)
   classify(@Param('id') id: string, @Body() dto: ReviewClassifyDto, @CurrentUser() user: JwtPayload) {
     return this.capturesService.classifyForReview(id, dto, user.email);
+  }
+
+  @Post(':id/classify-revenue')
+  @Roles(Role.BOOKKEEPER, Role.OWNER, Role.ADMIN)
+  classifyRevenue(@Param('id') id: string, @Body() dto: ReviewClassifyRevenueDto, @CurrentUser() user: JwtPayload) {
+    return this.capturesService.classifyRevenueForReview(id, dto, user.email);
   }
 }

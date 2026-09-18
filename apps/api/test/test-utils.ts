@@ -9,6 +9,7 @@ export async function cleanDatabase(prisma: PrismaService) {
   await prisma.attachment.deleteMany();
   await prisma.capture.deleteMany();
   await prisma.classificationRule.deleteMany();
+  await prisma.revenueClassificationRule.deleteMany();
   await prisma.accountFsMapping.deleteMany();
   await prisma.account.deleteMany();
   await prisma.fiscalPeriod.deleteMany();

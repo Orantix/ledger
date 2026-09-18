@@ -36,7 +36,7 @@ async function main() {
 
   // eslint-disable-next-line no-console
   console.log(
-    `Seeded ${counts.accountCount} accounts, ${counts.ruleCount} rules, ${counts.mappingCount} FS mappings, ${USERS.length} dev users.`,
+    `Seeded ${counts.accountCount} accounts, ${counts.ruleCount} rules, ${counts.revenueRuleCount} revenue rules, ${counts.mappingCount} FS mappings, ${USERS.length} dev users.`,
   );
   // eslint-disable-next-line no-console
   console.log(`Dev login: any seeded email above, password "${SEED_PASSWORD}".`);
