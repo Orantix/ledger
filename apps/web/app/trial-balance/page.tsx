@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRequireAuth } from '@/lib/auth';
 import { useApi } from '@/lib/useApi';
 import { TrialBalance } from '@/lib/api';
@@ -28,7 +29,10 @@ export default function TrialBalancePage() {
   return (
     <>
       <h1>Trial balance</h1>
-      <p className="subtitle">Every posted journal entry, summed by account. Debits should equal credits.</p>
+      <p className="subtitle">
+        Every posted journal entry, summed by account. Debits should equal credits. Click an account to see every
+        entry behind its balance.
+      </p>
 
       {error && <p className="error">{error}</p>}
 
@@ -51,8 +55,12 @@ export default function TrialBalancePage() {
                 <tbody>
                   {tb.rows.map((r) => (
                     <tr key={r.accountId}>
-                      <td>{r.code}</td>
-                      <td>{r.name}</td>
+                      <td>
+                        <Link href={`/trial-balance/${r.accountId}`}>{r.code}</Link>
+                      </td>
+                      <td>
+                        <Link href={`/trial-balance/${r.accountId}`}>{r.name}</Link>
+                      </td>
                       <td>{r.type}</td>
                       <td className="num">{r.totalDebit ? fmt(r.totalDebit) : ''}</td>
                       <td className="num">{r.totalCredit ? fmt(r.totalCredit) : ''}</td>

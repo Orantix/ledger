@@ -114,6 +114,27 @@ export interface TrialBalance {
   totalCredit: number;
 }
 
+export interface AccountLedgerLine {
+  id: string;
+  entryId: string;
+  date: string;
+  description: string;
+  entryStatus: 'POSTED' | 'REVERSED';
+  isReversal: boolean;
+  capture: { id: string; description: string } | null;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+}
+
+export interface AccountLedger {
+  account: { id: string; code: string; name: string; type: AccountType };
+  lines: AccountLedgerLine[];
+  totalDebit: number;
+  totalCredit: number;
+  balance: number;
+}
+
 export interface FiscalPeriod {
   id: string;
   label: string;
@@ -317,6 +338,7 @@ export function createApiClient(token: string | null, onUnauthorized?: () => voi
     listJournalEntries: () => f<JournalEntry[]>('/journal-entries'),
     reverseJournalEntry: (id: string) => f<JournalEntry>(`/journal-entries/${id}/reverse`, { method: 'POST' }),
     getTrialBalance: () => f<TrialBalance>('/trial-balance'),
+    getAccountLedger: (accountId: string) => f<AccountLedger>(`/trial-balance/${accountId}`),
 
     // Fiscal periods
     listPeriods: () => f<FiscalPeriod[]>('/fiscal-periods'),

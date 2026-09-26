@@ -465,6 +465,65 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Link that looks like the primary button (navigation, not an action). */
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.15s ease;
+}
+
+a.btn:hover {
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+/* Compact totals strip above a ledger table. */
+.ledger-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+.ledger-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ledger-summary span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ledger-summary strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+tbody tr.muted-row td {
+  color: var(--muted-2);
+}
+
 button.secondary {
   background: transparent;
   color: var(--text);

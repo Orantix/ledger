@@ -32,10 +32,20 @@ export default function CapturesPage() {
 
   return (
     <>
-      <h1>Captures</h1>
-      <p className="subtitle">
-        Every transaction entered in plain language, and where it stands in the pipeline.
-      </p>
+      <div className="page-header">
+        <div>
+          <h1>Captures</h1>
+          <p className="subtitle">
+            Every transaction entered in plain language, and where it stands in the pipeline.
+          </p>
+        </div>
+        <Link href="/capture/new" className="btn" aria-label="New capture">
+          <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }}>
+            +
+          </span>{' '}
+          New capture
+        </Link>
+      </div>
 
       {error && <p className="error">{error}</p>}
       {loading && !error && <p className="empty">Loading…</p>}
@@ -43,7 +53,7 @@ export default function CapturesPage() {
       {!error && !loading && (
         <div className="card">
           {captures.length === 0 ? (
-            <p className="empty">No captures yet. Start with &ldquo;New capture&rdquo;.</p>
+            <p className="empty">No captures yet. Click &ldquo;+ New capture&rdquo; to add one.</p>
           ) : (
             <table>
               <thead>

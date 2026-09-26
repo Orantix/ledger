@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Param } from '@nestjs/common';
 import { TrialBalanceService } from './trial-balance.service';
 
 @Controller('trial-balance')
@@ -8,5 +8,10 @@ export class TrialBalanceController {
   @Get()
   get() {
     return this.trialBalanceService.getTrialBalance();
+  }
+
+  @Get(':accountId')
+  getAccountLedger(@Param('accountId') accountId: string) {
+    return this.trialBalanceService.getAccountLedger(accountId);
   }
 }
